@@ -120,7 +120,7 @@ func TestCymru(t *testing.T) {
 
 func TestRegisteredDomain(t *testing.T) {
 	for in, want := range map[string]string{"www.cloudflare.com": "cloudflare.com", "a.b.example.co.uk": "example.co.uk",
-		"shop.msk.ru": "shop.msk.ru", "example.org.": "example.org", "traced.netkitty.dev": "nuv.cx"} {
+		"shop.msk.ru": "shop.msk.ru", "example.org.": "example.org", "traced.nuv.cx": "nuv.cx"} {
 		if got := RegisteredDomain(in); got != want {
 			t.Errorf("%s: %s want %s", in, got, want)
 		}
