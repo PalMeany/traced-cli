@@ -26,7 +26,7 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
 ![web map](docs/screenshot.png)
 
 > **Privacy:** there are no remote probes. Everything runs on your machine. Trace data is never uploaded anywhere. Only lookups (RDAP, IPmap, GeoIP, DNS) and basemap tiles leave the host. `--offline` keeps geolocation local (rDNS, IXP table, local geofeeds, mmdb).
-> The planned public home of the project is `traced.nuv.cx`. It is not live yet.
+> Site: https://traced.nuv.cx
 
 
 ## Без установки (как bench.sh)
