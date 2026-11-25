@@ -11,15 +11,18 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
   - rDNS parsing: 220+ IATA/city codes plus backbone naming schemes (Cogent, Arelion, NTT CLLI, Lumen/Level3, GTT, HE, RETN, Rostelecom, MTS, Selectel, clouds…)
   - an IXP prefix table (1,094 PeeringDB prefixes are built in, and `traced update-ixp` refreshes them)
   - RFC 8805 geofeeds, found automatically through RDAP/WHOIS (RFC 9632)
-  - RIPE IPmap
+  - RIPE IPmap (an answer backed only by a wide latency radius plus IPmap's "most populous city" pick is treated as a guess, and the radius itself as a constraint)
   - ip-api / ipinfo or a local `.mmdb`
+  - the registry country of the allocation (RDAP/WHOIS) as a cross-check: weak claims for another country are demoted, and its main city inside the IPmap latency radius is offered instead (`registry`)
 
-  A location that would need faster-than-fibre RTT (for example "Ashburn" for a hop 5 ms from Moscow) is flagged `rtt_anomaly`. traced then falls back to the next plausible source, or interpolates from the neighbouring hops.
+  A location that would need faster-than-fibre RTT (for example "Ashburn" for a hop 5 ms from Moscow) is flagged `rtt_anomaly`. traced then falls back to the next plausible source, or interpolates from the neighbouring hops. A weak claim sandwiched between two hops in the same city with no time for the detour (Stockholm → "Dublin" → Stockholm within 1 ms) is interpolated too.
 - **WHOIS/RDAP:** for a domain target: registrar, dates, NS, status, DNSSEC and DNS records. For an IP: ASN, org, netname, RIR and geofeed.
 - **Live MTR:** an ANSI terminal UI with loss, jitter, sparklines, ASN, city/IXP and geo source.
 - **History and diff:** every trace is stored, and `traced diff` shows changed hops, the AS path and RTT deltas.
 - **Local web map** (`go:embed`, MapLibre GL, CARTO Dark Matter basemap):
-  - city clusters you can click, arcs colored by RTT delta, and dashed lines for loss and ECMP branches
+  - city clusters you can click, labelled with their hop numbers; segments colored from the first hop to the last, with a direction arrow, and dashed lines for loss and ECMP branches
+  - a path that goes back and forth over the same cities (Moscow → Frankfurt → Moscow → Helsinki) draws every pass as its own arc: the way back bows to the other side, repeated passes bow further out
+  - hovering a segment highlights it with its hop rows (hop a → b, cities, Δrtt); hovering or clicking a hop in the table shows its segment on the map
   - overlay of several routes, with an AS-path diff
   - live traces streamed over SSE
 

@@ -76,12 +76,19 @@ table.hops td { padding: 3px 6px; border-bottom: 1px solid #18202b; vertical-ali
 table.hops tr.branch td { color: var(--muted); }
 table.hops tr:hover td { background: #141b25; }
 table.hops tr.hl td { background: #1b2a3a; }
+table.hops tr.seg-hl td { background: #23314a; }
+table.hops tr.seg-hl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+table.hops tr[data-ttl] { cursor: pointer; }
+.legend .grad { width: 90px; height: 5px; border-radius: 3px; display: inline-block;
+  background: linear-gradient(90deg, #3ddc97, #5cc8ff, #8f9bff, #d07cff, #ff5da8, #ff8a5c); }
+.segpop .maplibregl-popup-content { padding: 5px 8px; pointer-events: none; }
+.pop.seg + .pop.seg { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 4px; }
 .mono { font-family: var(--mono); }
 .num { text-align: right; font-family: var(--mono); white-space: nowrap; }
 .host { color: var(--muted); font-size: 11px; }
 .badge { display: inline-block; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; line-height: 15px; font-family: var(--mono); }
 .badge.rdns { color: #5cd6e8; } .badge.ixp { color: #d68cff; } .badge.geofeed { color: var(--ok); }
-.badge.ipmap { color: #7aa7ff; } .badge.geoip, .badge.mmdb { color: var(--warn); } .badge.interp { color: var(--muted); }
+.badge.ipmap { color: #7aa7ff; } .badge.geoip, .badge.mmdb { color: var(--warn); } .badge.registry { color: #e0b97a; } .badge.interp { color: var(--muted); }
 .badge.anom { color: var(--bad); } .badge.mpls { color: #ff8ad8; } .badge.ecmp { color: var(--accent); }
 .rtt-ok { color: var(--ok); } .rtt-mid { color: var(--warn); } .rtt-bad { color: var(--bad); }
 
@@ -90,6 +97,9 @@ table.hops tr.hl td { background: #1b2a3a; }
   color: var(--text); font: 600 11px/18px var(--mono); text-align: center; cursor: pointer; box-shadow: 0 0 0 4px #5cc8ff22; }
 .node.ixp { border-color: #d68cff; }
 .node.anom { border-color: var(--bad); }
+
+.node .cap { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 2px; white-space: nowrap; pointer-events: none;
+  font: 500 10px/12px var(--sans, system-ui); color: #c9d4e0; text-shadow: 0 0 3px #000, 0 0 2px #000; }
 .node .dots { display: inline-flex; gap: 2px; margin-left: 3px; vertical-align: middle; }
 .node .dots b { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .maplibregl-popup-content { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-height: 320px; overflow: auto; }

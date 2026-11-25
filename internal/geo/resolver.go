@@ -435,6 +435,70 @@ func Validate(hops []trace.Hop, data map[string]*IPData, origin *Point) {
 			}
 		}
 	}
+	fixDetours(hops)
+}
+
+// fixDetours catches weak claims that would be a detour: a hop sitting between
+// two reliably located hops in the same metro whose RTTs leave no time for a
+// trip to the claimed place and back (Stockholm 33 ms → "Dublin" 31 ms →
+// Stockholm 31.6 ms). The packet to the next hop passes through this one, so
+// going there would add at least MinRTTms(distance).
+func fixDetours(hops []trace.Hop) {
+	type loc struct {
+		hop  int
+		info *Info
+		rtt  float64
+	}
+	var all []loc
+	for hi := range hops {
+		for ri := range hops[hi].Responders {
+			rs := &hops[hi].Responders[ri]
+			if info, ok := rs.Geo.(*Info); ok && info != nil && info.Located {
+				all = append(all, loc{hi, info, minF(rs.RTTs)})
+			}
+		}
+	}
+	strong := func(l loc) bool { return l.info.Confidence >= 0.6 && l.rtt > 0 }
+	for i, x := range all {
+		if x.info.Confidence >= 0.6 || x.info.Source == SrcInterp {
+			continue
+		}
+		var prev, next *loc
+		for j := i - 1; j >= 0 && prev == nil; j-- {
+			if all[j].hop < x.hop && strong(all[j]) {
+				prev = &all[j]
+			}
+		}
+		for j := i + 1; j < len(all) && next == nil; j++ {
+			if all[j].hop > x.hop && strong(all[j]) {
+				next = &all[j]
+			}
+		}
+		if prev == nil || next == nil {
+			continue
+		}
+		p, n := prev.info, next.info
+		if DistanceKm(p.Lat, p.Lon, n.Lat, n.Lon) > SlackKm {
+			continue
+		}
+		d := DistanceKm(p.Lat, p.Lon, x.info.Lat, x.info.Lon)
+		if d <= 2*SlackKm || next.rtt >= prev.rtt+MinRTTms(d) {
+			continue
+		}
+		why := fmt.Sprintf("between hops in %s at %.1f and %.1f ms, a detour of %.0f km needs ≥ %.1f ms more",
+			p.City, prev.rtt, next.rtt, d, MinRTTms(d))
+		for ci := range x.info.Candidates {
+			c := &x.info.Candidates[ci]
+			if c.Source == x.info.Source && c.Rejected == "" && c.Lat == x.info.Lat && c.Lon == x.info.Lon {
+				c.Rejected = why
+			}
+		}
+		x.info.RTTAnomaly = true
+		x.info.Anomaly = fmt.Sprintf("%s says %s %s, but %s", x.info.Source, x.info.City, x.info.Country, why)
+		x.info.City, x.info.Region, x.info.Country = p.City, p.Region, p.Country
+		x.info.Lat, x.info.Lon = p.Lat, p.Lon
+		x.info.Source, x.info.Confidence = SrcInterp, 0.3
+	}
 }
 
 func minF(v []float64) float64 {

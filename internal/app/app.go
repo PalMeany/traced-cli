@@ -16,7 +16,7 @@ import (
 )
 
 // Version of traced.
-var Version = "1.1.0"
+var Version = "1.1.2"
 
 // Config describes one trace job.
 type Config struct {

@@ -119,3 +119,33 @@ func TestBorderReconcile(t *testing.T) {
 		}
 	}
 }
+
+// 163.77.146.26 (Meta, geoip "Dublin") between MTS Stockholm (33 ms) and
+// Facebook arn2 Stockholm (31.6 ms): no time for a trip to Ireland.
+func TestDetourBetweenSameMetro(t *testing.T) {
+	sto := LookupCity("sto")
+	strongSto := func(src string) Candidate {
+		return Candidate{Source: src, City: sto.Name, Country: "SE", Lat: sto.Lat, Lon: sto.Lon, HasCoords: true, Confidence: 0.85}
+	}
+	mk := func(midRTT, nextRTT float64) *Info {
+		hops := []trace.Hop{
+			{TTL: 1, Responders: []trace.Responder{{IP: "192.0.2.1", RTTs: []float64{33}}}},
+			{TTL: 2, Responders: []trace.Responder{{IP: "192.0.2.2", RTTs: []float64{midRTT}}}},
+			{TTL: 3, Responders: []trace.Responder{{IP: "192.0.2.3", RTTs: []float64{nextRTT}}}},
+		}
+		data := map[string]*IPData{
+			"192.0.2.1": {cands: []Candidate{strongSto(SrcRDNS)}},
+			"192.0.2.2": {cands: []Candidate{{Source: SrcGeoIP, City: "Dublin", Country: "IE", Lat: 53.35, Lon: -6.26, HasCoords: true, Confidence: 0.4}}},
+			"192.0.2.3": {cands: []Candidate{strongSto(SrcIPMap)}},
+		}
+		Validate(hops, data, nil)
+		return hops[1].Responders[0].Geo.(*Info)
+	}
+	if info := mk(31, 31.6); info.City != "Stockholm" || info.Source != SrcInterp || !info.RTTAnomaly {
+		t.Fatalf("detour not caught: %+v", info)
+	}
+	// with enough extra delay on the next hop the claim stays
+	if info := mk(45, 52); info.City != "Dublin" {
+		t.Fatalf("plausible detour rejected: %+v", info)
+	}
+}
