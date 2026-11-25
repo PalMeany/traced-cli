@@ -156,7 +156,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	src, n := geo.IXPSource()
 	writeJSON(w, map[string]any{"version": app.Version, "ixp_source": src, "ixp_prefixes": n, "cities": geo.CityCount(),
-		"domain": "traced.nuv.cx"})
+		"domain": "traced.netkitty.dev"})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

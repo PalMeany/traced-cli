@@ -1,6 +1,6 @@
 // traced web UI. Locally (traced map/serve) traces never leave the machine;
 // only map tiles are fetched from the basemap CDN. The same code runs read-only
-// on the public share server (traced.nuv.cx/t/<id>), marked by
+// on the public share server (traced.netkitty.dev/t/<id>), marked by
 // <html data-mode="share"> and <meta name="traced-share" content="<id>">.
 const $ = (s, el = document) => el.querySelector(s);
 const SHARE = document.documentElement.dataset.mode === 'share';
@@ -433,7 +433,7 @@ async function bootShare() {
   document.body.classList.add('shared');
   const note = document.createElement('div');
   note.className = 'sharenote';
-  note.innerHTML = 'shared trace · run your own: <code>curl -sL traced.nuv.cx | sh -s -- 1.1.1.1</code> · <a href="/">traced.nuv.cx</a>';
+  note.innerHTML = 'shared trace · run your own: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code> · <a href="/">traced.netkitty.dev</a>';
   $('.bar .brand').after(note);
   api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')}`; }).catch(() => {});
   initMap();

@@ -300,7 +300,7 @@ func (s *Session) send(ctx context.Context, p *pending) {
 		seq := int(atomic.AddUint32(&s.seq, 1) & 0xffff)
 		p.key = fmt.Sprintf("i:%d", seq)
 		payload := make([]byte, s.Opts.PacketLen)
-		copy(payload, "traced.nuv.cx")
+		copy(payload, "traced.netkitty.dev")
 		{
 			// keep the ICMP checksum constant per flow so that per-flow load
 			// balancers keep each flow on one path (Paris traceroute trick);

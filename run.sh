@@ -1,7 +1,7 @@
 #!/bin/sh
 # traced без установки:
-#   curl -sL traced.nuv.cx | sh -s -- 1.1.1.1
-#   wget -qO- traced.nuv.cx | sh -s -- whois example.com
+#   curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1
+#   wget -qO- traced.netkitty.dev | sh -s -- whois example.com
 # бинарник качается во временную папку, запускается и удаляется. TRACED_VERSION=v1.0.1 — конкретная версия.
 set -e
 REPO="PalMeany/traced-cli"

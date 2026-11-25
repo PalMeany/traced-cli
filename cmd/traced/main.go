@@ -43,7 +43,7 @@ usage:
   traced map [id...]               open the local web map (with traces preselected)
   traced serve [--listen addr]     run the web UI without opening a browser
   traced update-ixp                refresh the IXP prefix table from PeeringDB
-  traced share-server [flags]      public trace store + read-only map (what runs on traced.nuv.cx)
+  traced share-server [flags]      public trace store + read-only map (what runs on traced.netkitty.dev)
   traced version
 
 trace flags:
@@ -63,7 +63,7 @@ trace flags:
   --origin LAT,LON|CODE  your location (improves RTT physics checks)
   -n                  numeric (no PTR names)   --no-whois  --no-save
   --no-share          do not publish the trace (by default it is uploaded and a map
-                      link https://traced.nuv.cx/t/<id> is printed; kept 30 days)
+                      link https://traced.netkitty.dev/t/<id> is printed; kept 30 days)
   --share-url URL     your own share server (traced share-server)
 
 env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, TRACED_NO_SHARE=1, TRACED_SHARE_URL, NO_COLOR
@@ -457,9 +457,17 @@ func cmdMTR(args []string) error {
 // publish uploads the trace to the public map and returns the link. Failures
 // are reported as one line on stderr and never fail the command.
 func publish(o *opts, r *trace.Result) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	resp, err := share.Upload(ctx, o.shareURL, r)
+	var resp *share.Response
+	var err error
+	if o.shareURL == "" || o.shareURL == share.DefaultURL {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		resp, err = share.UploadAny(ctx, r, 6*time.Second)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		resp, err = share.Upload(ctx, o.shareURL, r)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, ui.C("\x1b[90m", "карта: не удалось загрузить трассу ("+err.Error()+"); --no-share отключает загрузку"))
 		return ""

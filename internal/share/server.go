@@ -26,7 +26,7 @@ import (
 // ServerOptions configure the public trace store.
 type ServerOptions struct {
 	Dir       string        // storage directory
-	PublicURL string        // base of the links handed out, e.g. https://traced.nuv.cx
+	PublicURL string        // base of the links handed out, e.g. https://traced.netkitty.dev
 	TTL       time.Duration // lifetime of a trace (30 days)
 	Rate      int           // uploads per IP per hour
 	Burst     int           // uploads allowed at once
@@ -305,7 +305,7 @@ const notFoundPage = `<!doctype html><html lang="en"><head><meta charset="utf-8"
 <title>traced — trace not found</title><style>body{margin:0;background:#0b0e13;color:#d7dee8;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}
 main{max-width:520px;padding:24px}a{color:#5cc8ff}code{background:#161d27;padding:2px 6px;border-radius:4px}</style></head><body><main>
 <h1>Trace not found</h1><p>The link is wrong or the trace has expired (shared traces live %d days).</p>
-<p>Run your own: <code>curl -sL traced.nuv.cx | sh -s -- 1.1.1.1</code></p><p><a href="/">traced.nuv.cx</a></p></main></body></html>`
+<p>Run your own: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code></p><p><a href="/">traced.netkitty.dev</a></p></main></body></html>`
 
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

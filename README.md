@@ -23,25 +23,25 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
   - overlay of several routes, with an AS-path diff
   - live traces streamed over SSE
 
-- **Online map link:** after a trace (and when you quit `traced mtr`) the result is published and a link is printed — `карта: https://traced.nuv.cx/t/<id>`. The page is the same map in read-only mode: hops, ASN, cities, RTT, the path and the hop table. Links live 30 days. `--no-share` or `TRACED_NO_SHARE=1` turns it off; `--share-url` points to your own `traced share-server`.
+- **Online map link:** after a trace (and when you quit `traced mtr`) the result is published and a link is printed — `карта: https://traced.netkitty.dev/t/<id>`. The page is the same map in read-only mode: hops, ASN, cities, RTT, the path and the hop table. Links live 30 days. `--no-share` or `TRACED_NO_SHARE=1` turns it off; `--share-url` points to your own `traced share-server`.
 
 ![web map](docs/screenshot.png)
 
 > **Privacy:** there are no remote probes. Everything runs on your machine. By default the finished trace itself (target, hop IPs, PTR names, ASN, geo, RTT, the target's public WHOIS/DNS and SNI probe) is uploaded for the map link — nothing else: no history id, interface or tunnel names, notes, and your public IP is not added (the first private hop such as 192.168.1.1 stays as is). `--no-share` / `TRACED_NO_SHARE=1` keeps everything local; then only lookups (RDAP, IPmap, GeoIP, DNS) and basemap tiles leave the host. `--offline` keeps geolocation local (rDNS, IXP table, local geofeeds, mmdb).
-> Site: https://traced.nuv.cx
+> Site: https://traced.netkitty.dev (зеркало https://traced.nuvira.su)
 
 
 ## Без установки (как bench.sh)
 
 ```sh
-curl -sL traced.nuv.cx | sh -s -- 1.1.1.1
-wget -qO- traced.nuv.cx | sh -s -- sni example.com
+curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1
+wget -qO- traced.netkitty.dev | sh -s -- sni example.com
 ```
 
-В конце печатается ссылка на карту трассы: `карта: https://traced.nuv.cx/t/<id>` (хранится 30 дней; отключить — `--no-share` или `TRACED_NO_SHARE=1`):
+В конце печатается ссылка на карту трассы: `карта: https://traced.netkitty.dev/t/<id>` (хранится 30 дней; отключить — `--no-share` или `TRACED_NO_SHARE=1`):
 
 ```sh
-curl -sL traced.nuv.cx | sh -s -- 1.1.1.1 --no-share
+curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1 --no-share
 ```
 
 Скрипт определяет ОС/архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из последнего релиза во временную папку, сверяет SHA256, запускает с вашими аргументами и удаляет. На linux без root трассировка запускается через sudo. Конкретная версия: `TRACED_VERSION=v1.1.0`.
@@ -88,7 +88,7 @@ Common flags:
 | `--origin LAT,LON\|CODE` | your own location, for stricter RTT physics checks |
 | `-n`, `--no-whois`, `--no-save` | numeric output; skip WHOIS; do not save the trace |
 | `--no-share` | do not publish the trace / print the online map link (also `TRACED_NO_SHARE=1`) |
-| `--share-url URL` | publish to your own share server instead of https://traced.nuv.cx |
+| `--share-url URL` | publish to your own share server instead of https://traced.netkitty.dev |
 
 Environment variables: `TRACED_IPINFO_TOKEN`, `TRACED_MMDB`, `TRACED_IFACE`, `TRACED_ORIGIN`, `TRACED_NO_SHARE`, `TRACED_SHARE_URL`, `NO_COLOR`.
 With `--json` the link is added as the `share_url` field.
@@ -175,7 +175,7 @@ traced whois 8.8.8.8 --json
   - The server listens on 127.0.0.1.
   - Host and Origin are checked, which blocks DNS rebinding and cross-site requests to `/api/run`.
   - Traces stream over Server-Sent Events.
-- **Share server** (`internal/share`, `traced share-server`): what runs behind https://traced.nuv.cx.
+- **Share server** (`internal/share`, `traced share-server`): what runs behind https://traced.netkitty.dev.
   - `POST /api/traces` takes a trace (≤ 512 KB), re-decodes it into the fixed schema (unknown fields and local details dropped), stores it under a random 10-char base62 id; `GET /api/traces/<id>` returns the JSON, `GET /t/<id>` the read-only map (same embedded UI).
   - Traces expire after 30 days (`--ttl`), an hourly sweep deletes them; total size is capped (`--max-mb`).
   - Rate limit per client IP (`--rate`/`--burst`, IPv6 per /64). `CF-Connecting-IP` is trusted only when the peer is a Cloudflare edge address; behind a local nginx the peer comes from `X-Real-IP`.

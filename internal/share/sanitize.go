@@ -1,5 +1,5 @@
 // Package share publishes finished traces to a public read-only map
-// (https://traced.nuv.cx/t/<id>): the upload client used by the CLI and the
+// (https://traced.netkitty.dev/t/<id>): the upload client used by the CLI and the
 // storage server behind the site.
 package share
 

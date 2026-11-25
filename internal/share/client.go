@@ -17,7 +17,36 @@ import (
 )
 
 // DefaultURL is the public map server.
-const DefaultURL = "https://traced.nuv.cx"
+const DefaultURL = "https://traced.netkitty.dev"
+
+// Mirrors are tried in order when DefaultURL is unreachable (some ISPs cut
+// TLS by SNI). The https mirror proxies to the same storage; the plain-http
+// fallback only carries the upload, the link stays on DefaultURL.
+var Mirrors = []string{"https://traced.nuvira.su", "http://traced.netkitty.dev"}
+
+// UploadAny tries DefaultURL and then the mirrors, each with its own timeout.
+// Links obtained through an https mirror point at that mirror.
+func UploadAny(ctx context.Context, r *trace.Result, per time.Duration) (*Response, error) {
+	var firstErr error
+	for _, base := range append([]string{DefaultURL}, Mirrors...) {
+		c, cancel := context.WithTimeout(ctx, per)
+		resp, err := Upload(c, base, r)
+		cancel()
+		if err == nil {
+			if strings.HasPrefix(base, "https://") && base != DefaultURL && strings.HasPrefix(resp.URL, DefaultURL) {
+				resp.URL = base + strings.TrimPrefix(resp.URL, DefaultURL)
+			}
+			return resp, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, firstErr
+}
 
 // Response of POST /api/traces.
 type Response struct {

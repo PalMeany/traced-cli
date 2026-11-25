@@ -1,4 +1,4 @@
-# /etc/systemd/system/traced-share.service — public trace store behind traced.nuv.cx/t/
+# /etc/systemd/system/traced-share.service — public trace store behind traced.netkitty.dev/t/
 [Unit]
 Description=traced share server (public trace map links)
 After=network-online.target
@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 User=traced-share
 Group=traced-share
-ExecStart=/usr/local/bin/traced-share share-server --listen 127.0.0.1:7480 --dir /var/lib/traced-share --public-url https://traced.nuv.cx
+ExecStart=/usr/local/bin/traced-share share-server --listen 127.0.0.1:7480 --dir /var/lib/traced-share --public-url https://traced.netkitty.dev
 StateDirectory=traced-share
 StateDirectoryMode=0750
 Restart=on-failure
