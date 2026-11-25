@@ -119,6 +119,7 @@ type IPData struct {
 	ixp   *IXP
 	bb    *Backbone
 	feed  string
+	rir   string // country of the allocation (RDAP/whois, else the ASN's)
 	priv  bool
 }
 
@@ -203,8 +204,9 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 					}()
 				}
 				d.as, _ = whois.LookupASN(ctx, ip)
-				if !r.o.NoGeofeed {
-					if info, err := whois.LookupIP(ctx, s); err == nil && info.Geofeed != "" {
+				if info, err := whois.LookupIP(ctx, s); err == nil {
+					d.rir = strings.ToUpper(info.Country)
+					if !r.o.NoGeofeed && info.Geofeed != "" {
 						d.feed = info.Geofeed
 						if g, err := FetchGeofeed(ctx, info.Geofeed); err == nil {
 							if e := g.Lookup(ip); e != nil {
@@ -212,6 +214,9 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 							}
 						}
 					}
+				}
+				if d.rir == "" && d.as != nil {
+					d.rir = strings.ToUpper(d.as.Country)
 				}
 				iwg.Wait()
 				if imc != nil {
@@ -243,9 +248,56 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 				}
 			}
 		}
+		d.cands = Reconcile(d.cands, d.rir)
 		sort.SliceStable(d.cands, func(i, j int) bool { return d.cands[i].Confidence > d.cands[j].Confidence })
 	}
 	return out
+}
+
+// weakSources are database-style answers that often carry a company's home
+// country rather than where the address actually is.
+var weakSources = map[string]bool{SrcIPMap: true, SrcGeoIP: true, SrcMMDB: true}
+
+// Reconcile cross-checks weak candidates against the registry country of the
+// allocation (rir). Weak claims (confidence < 0.6: IPmap guesses, GeoIP, mmdb)
+// naming another country are demoted. If nothing with coordinates agrees with
+// the registry and IPmap supplied a latency radius, the best known city of the
+// registry country inside that radius is offered instead — the radius is a
+// measurement, the population pick of IPmap's "worlds" engine is not.
+func Reconcile(cands []Candidate, rir string) []Candidate {
+	if rir == "" || rir == "ZZ" || rir == "EU" {
+		return cands
+	}
+	var area *Area
+	for _, c := range cands {
+		if c.Area != nil {
+			area = c.Area
+			break
+		}
+	}
+	agree := false
+	for i := range cands {
+		c := &cands[i]
+		if strings.EqualFold(c.Country, rir) {
+			agree = agree || c.HasCoords && area.Contains(c.Lat, c.Lon)
+			continue
+		}
+		if c.Country != "" && c.Confidence < 0.6 && weakSources[c.Source] {
+			c.Confidence *= 0.6
+			c.Detail = strings.TrimPrefix(c.Detail+"; registry says "+rir, "; ")
+		}
+	}
+	if agree || area == nil {
+		return cands
+	}
+	for _, ct := range allCities { // the table lists the main city of each country first
+		if strings.EqualFold(ct.Country, rir) && area.Contains(ct.Lat, ct.Lon) {
+			return append(cands, Candidate{Source: SrcRIR, City: ct.Name, Country: ct.Country, Lat: ct.Lat, Lon: ct.Lon,
+				HasCoords: true, Confidence: 0.35,
+				Detail: fmt.Sprintf("registry country %s, main city inside the %.0f km latency radius", rir, area.RadiusKm)})
+		}
+	}
+	return cands
 }
 
 func feedCandidate(e *GeofeedEntry, url string, conf float64) Candidate {
@@ -303,10 +355,24 @@ func Validate(hops []trace.Hop, data map[string]*IPData, origin *Point) {
 			info := &Info{Private: d.priv, IXP: d.ixp, Backbone: d.bb, Geofeed: d.feed}
 			rtt := minF(rs.RTTs)
 			cands := append([]Candidate(nil), d.cands...)
+			var area *Area
+			for _, c := range cands {
+				if c.Area != nil {
+					area = c.Area
+					break
+				}
+			}
 			chosen := -1
 			for ci := range cands {
 				c := &cands[ci]
 				if !c.HasCoords {
+					continue
+				}
+				// the radius is one Atlas probe's view (its own position may be off,
+				// or another interface answered): it vetoes only weak claims
+				if c.Confidence < 0.6 && !area.Contains(c.Lat, c.Lon) {
+					c.Rejected = fmt.Sprintf("%.0f km from %s, outside its %.0f km latency radius",
+						DistanceKm(area.Lat, area.Lon, c.Lat, c.Lon), orStr(area.From, "a RIPE Atlas probe"), area.RadiusKm)
 					continue
 				}
 				p := Point{Lat: c.Lat, Lon: c.Lon, RTT: rtt}
@@ -379,4 +445,11 @@ func minF(v []float64) float64 {
 		}
 	}
 	return m
+}
+
+func orStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }

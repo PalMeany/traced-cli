@@ -131,7 +131,7 @@ func FmtRTT(ms float64) string {
 // SourceBadge renders the geo source.
 func SourceBadge(src string) string {
 	col := map[string]string{geo.SrcRDNS: cyan, geo.SrcIXP: magenta, geo.SrcGeofeed: green, geo.SrcIPMap: blue,
-		geo.SrcGeoIP: yellow, geo.SrcMMDB: yellow, geo.SrcInterp: gray}[src]
+		geo.SrcGeoIP: yellow, geo.SrcMMDB: yellow, geo.SrcRIR: yellow, geo.SrcInterp: gray}[src]
 	if src == "" {
 		return ""
 	}

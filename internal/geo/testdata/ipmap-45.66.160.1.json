@@ -1,0 +1,41 @@
+{
+ "location": {
+  "id": "STOCKHOLM-SE-26-U6SCE0T4XQN9NNCBN59Y",
+  "type": "city",
+  "cityName": "Stockholm",
+  "iataCode": "STO",
+  "latitude": 59.32938,
+  "geonameId": 2673730,
+  "longitude": 18.06871,
+  "stateName": "Stockholm",
+  "countryName": "Sweden",
+  "stateIsoCode": "SE-AB",
+  "cityNameAscii": "Stockholm",
+  "pointGeometry": "0101000020E61000007DE882FA961132406EFAB31F29AA4D40",
+  "stateAnsiCode": "26",
+  "cityPopulation": 1515017,
+  "countryCodeAlpha2": "SE",
+  "countryCodeAlpha3": "SWE",
+  "contributions": {
+   "worlds": {
+    "score": 3,
+    "populationScore": 3
+   },
+   "latency": {
+    "score": 0.5,
+    "radius": {
+     "longitude": 22.27,
+     "latitude": 60.45,
+     "maxDistanceMetres": 654645
+    },
+    "minRtt": 6.622,
+    "latestDay": "2026-11-07",
+    "sourceId": "https://atlas.ripe.net/probes/1018446",
+    "confirmations": 0
+   }
+  },
+  "score": 8,
+  "geofeed": "45.66.160.1,SE,SE-AB,Stockholm,"
+ },
+ "alternatives": []
+}

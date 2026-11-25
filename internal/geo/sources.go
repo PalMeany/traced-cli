@@ -31,7 +31,32 @@ const (
 	SrcGeoIP   = "geoip"
 	SrcMMDB    = "mmdb"
 	SrcInterp  = "interp"
+	SrcRIR     = "registry"
 )
+
+// Area is a physical constraint: the address is within RadiusKm of a point
+// (RIPE IPmap's latency engine: a RIPE Atlas probe saw it at a low RTT).
+type Area struct {
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	RadiusKm float64 `json:"radius_km"`
+	From     string  `json:"from,omitempty"`
+}
+
+// Contains reports whether (lat, lon) lies inside the area (with SlackKm).
+func (a *Area) Contains(lat, lon float64) bool {
+	return a == nil || DistanceKm(a.Lat, a.Lon, lat, lon) <= a.RadiusKm+SlackKm
+}
+
+// GuessRadiusKm: an IPmap answer backed only by the latency radius plus the
+// "worlds" engine is just the most populous city inside that circle. When the
+// circle is this wide it spans several countries, so the city/country is a
+// guess, not a measurement.
+const GuessRadiusKm = 250.0
+
+// GuessConfidence keeps such a pick just above a plain GeoIP answer (it is at
+// least bounded by a measurement) but below anything that can anchor others.
+const GuessConfidence = 0.42
 
 // Candidate is a location claim from one source.
 type Candidate struct {
@@ -45,6 +70,8 @@ type Candidate struct {
 	Confidence float64 `json:"confidence"`
 	Detail     string  `json:"detail,omitempty"`
 	Rejected   string  `json:"rejected,omitempty"` // physics violation
+	Guess      bool    `json:"guess,omitempty"`    // population pick, not a measurement
+	Area       *Area   `json:"area,omitempty"`     // where the address must be (latency)
 }
 
 func getJSON(ctx context.Context, url string, v any) error {
@@ -66,32 +93,36 @@ func getJSON(ctx context.Context, url string, v any) error {
 
 type ipmapResp struct {
 	Location *struct {
-		CityName    string  `json:"cityNameAscii"`
-		City        string  `json:"cityName"`
-		State       string  `json:"stateName"`
-		CountryCode string  `json:"countryCodeAlpha2"`
-		Lat         float64 `json:"latitude"`
-		Lon         float64 `json:"longitude"`
-		Score       float64 `json:"score"`
-		IATA        string  `json:"iataCode"`
+		CityName      string                     `json:"cityNameAscii"`
+		City          string                     `json:"cityName"`
+		State         string                     `json:"stateName"`
+		CountryCode   string                     `json:"countryCodeAlpha2"`
+		Lat           float64                    `json:"latitude"`
+		Lon           float64                    `json:"longitude"`
+		Score         float64                    `json:"score"`
+		IATA          string                     `json:"iataCode"`
+		Contributions map[string]json.RawMessage `json:"contributions"`
 	} `json:"location"`
 }
 
-// IPMap queries the RIPE IPmap "best" engine (free, no key).
-func IPMap(ctx context.Context, ip string) (*Candidate, error) {
-	var c Candidate
-	if cache.Get("ipmap", ip, &c) {
-		if c.Source == "" {
-			return nil, nil
-		}
-		return &c, nil
-	}
+type ipmapLatency struct {
+	Score  float64 `json:"score"`
+	Source string  `json:"sourceId"`
+	MinRTT float64 `json:"minRtt"`
+	Radius *struct {
+		Lat  float64 `json:"latitude"`
+		Lon  float64 `json:"longitude"`
+		MaxM float64 `json:"maxDistanceMetres"`
+	} `json:"radius"`
+}
+
+// ParseIPMap turns an IPmap /best answer into a candidate (nil when empty).
+func ParseIPMap(b []byte) (*Candidate, error) {
 	var r ipmapResp
-	if err := getJSON(ctx, "https://ipmap-api.ripe.net/v1/locate/"+ip+"/best", &r); err != nil {
+	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, err
 	}
 	if r.Location == nil || r.Location.Lat == 0 && r.Location.Lon == 0 {
-		cache.Put("ipmap", ip, Candidate{}, 24*time.Hour)
 		return nil, nil
 	}
 	l := r.Location
@@ -106,10 +137,53 @@ func IPMap(ctx context.Context, ip string) (*Candidate, error) {
 	if name == "" {
 		name = l.City
 	}
-	c = Candidate{Source: SrcIPMap, City: name, Region: l.State, Country: l.CountryCode, Lat: l.Lat, Lon: l.Lon,
+	c := Candidate{Source: SrcIPMap, City: name, Region: l.State, Country: l.CountryCode, Lat: l.Lat, Lon: l.Lon,
 		HasCoords: true, Confidence: conf, Detail: fmt.Sprintf("score %.0f", l.Score)}
-	cache.Put("ipmap", ip, c, 7*24*time.Hour)
+	measured := false // an engine that actually points at a place (rdns, ixp, crowdsourced, anycast...)
+	for k, raw := range l.Contributions {
+		switch k {
+		case "worlds":
+		case "latency":
+			var lat ipmapLatency
+			if json.Unmarshal(raw, &lat) == nil && lat.Radius != nil && lat.Radius.MaxM > 0 {
+				c.Area = &Area{Lat: lat.Radius.Lat, Lon: lat.Radius.Lon, RadiusKm: lat.Radius.MaxM / 1000,
+					From: strings.TrimPrefix(lat.Source, "https://atlas.ripe.net/")}
+			}
+		default:
+			measured = true
+		}
+	}
+	if !measured && c.Area != nil && c.Area.RadiusKm > GuessRadiusKm {
+		c.Guess = true
+		c.Confidence = minF([]float64{c.Confidence, GuessConfidence})
+		c.Detail += fmt.Sprintf(", population pick inside a %.0f km latency radius", c.Area.RadiusKm)
+	}
 	return &c, nil
+}
+
+// IPMap queries the RIPE IPmap "best" engine (free, no key).
+func IPMap(ctx context.Context, ip string) (*Candidate, error) {
+	var c Candidate
+	if cache.Get("ipmap-v2", ip, &c) {
+		if c.Source == "" {
+			return nil, nil
+		}
+		return &c, nil
+	}
+	var raw json.RawMessage
+	if err := getJSON(ctx, "https://ipmap-api.ripe.net/v1/locate/"+ip+"/best", &raw); err != nil {
+		return nil, err
+	}
+	p, err := ParseIPMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		cache.Put("ipmap-v2", ip, Candidate{}, 24*time.Hour)
+		return nil, nil
+	}
+	cache.Put("ipmap-v2", ip, *p, 7*24*time.Hour)
+	return p, nil
 }
 
 // ---------- ip-api (batch) ----------

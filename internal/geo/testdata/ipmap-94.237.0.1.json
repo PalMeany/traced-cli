@@ -1,0 +1,50 @@
+{
+ "location": {
+  "id": "COPENHAGEN-DK-17-U3BUTZMZY56Q8QZ7N7KG",
+  "type": "city",
+  "cityName": "Copenhagen",
+  "iataCode": "CPH",
+  "latitude": 55.67594,
+  "geonameId": 2618425,
+  "longitude": 12.56553,
+  "stateName": "Hovedstaden",
+  "countryName": "Denmark",
+  "stateIsoCode": "DK-84",
+  "cityNameAscii": "Copenhagen",
+  "pointGeometry": "0101000020E610000053D0ED258D2129407407B13385D64B40",
+  "stateAnsiCode": "17",
+  "cityPopulation": 1153615,
+  "countryCodeAlpha2": "DK",
+  "countryCodeAlpha3": "DNK",
+  "contributions": {
+   "reverse-dns": {
+    "score": 16,
+    "matchType": "pattern"
+   },
+   "worlds": {
+    "score": 2,
+    "populationScore": 2
+   },
+   "latency": {
+    "score": 8.679489920076202,
+    "radius": {
+     "longitude": 18.07,
+     "latitude": 59.33,
+     "maxDistanceMetres": 908368
+    },
+    "minRtt": 9.123,
+    "latestDay": "2026-11-23",
+    "sourceId": "https://atlas.ripe.net/probes/1019130",
+    "confirmations": 3
+   }
+  },
+  "score": 54.71795968030481,
+  "geofeed": "94.237.0.1,DK,DK-84,Copenhagen,"
+ },
+ "alternatives": [
+  {
+   "id": "STOCKHOLM-SE-26-U6SCE0T4XQN9NNCBN59Y",
+   "score": 40.71795968030481
+  }
+ ]
+}
