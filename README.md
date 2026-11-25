@@ -28,6 +28,16 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
 > **Privacy:** there are no remote probes. Everything runs on your machine. Trace data is never uploaded anywhere. Only lookups (RDAP, IPmap, GeoIP, DNS) and basemap tiles leave the host. `--offline` keeps geolocation local (rDNS, IXP table, local geofeeds, mmdb).
 > The planned public home of the project is `traced.nuv.cx`. It is not live yet.
 
+
+## Без установки (как bench.sh)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/PalMeany/traced-cli/main/run.sh | sh -s -- 1.1.1.1
+wget -qO- https://raw.githubusercontent.com/PalMeany/traced-cli/main/run.sh | sh -s -- sni example.com
+```
+
+Скрипт определяет ОС/архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из последнего релиза во временную папку, сверяет SHA256, запускает с вашими аргументами и удаляет. На linux без root трассировка запускается через sudo. Конкретная версия: `TRACED_VERSION=v1.0.1`.
+
 ## Install
 
 ```sh
