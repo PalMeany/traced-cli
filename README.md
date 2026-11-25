@@ -32,8 +32,8 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
 ## Без установки (как bench.sh)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/PalMeany/traced-cli/main/run.sh | sh -s -- 1.1.1.1
-wget -qO- https://raw.githubusercontent.com/PalMeany/traced-cli/main/run.sh | sh -s -- sni example.com
+curl -sL traced.nuv.cx | sh -s -- 1.1.1.1
+wget -qO- traced.nuv.cx | sh -s -- sni example.com
 ```
 
 Скрипт определяет ОС/архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из последнего релиза во временную папку, сверяет SHA256, запускает с вашими аргументами и удаляет. На linux без root трассировка запускается через sudo. Конкретная версия: `TRACED_VERSION=v1.0.1`.

@@ -1,0 +1,45 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>traced — traceroute с честной геолокацией</title>
+<meta name="description" content="traceroute с ECMP, MPLS, SNI/DPI-пробами, проверенным geoip, WHOIS, MTR и веб-картой. Запуск одной строкой.">
+<style>
+:root{--bg:#0b0d10;--fg:#e6e8eb;--mut:#8b939c;--acc:#5cc8ff;--card:#13171c;--bd:#222831}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:64px 20px}
+h1{font:700 44px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 0 8px;letter-spacing:-1px}h1 span{color:var(--acc)}
+.lead{color:var(--mut);font-size:18px;margin:0 0 36px}
+.cmd{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;font:14px ui-monospace,Menlo,monospace;overflow-x:auto}
+.cmd code{flex:1;white-space:nowrap}.cmd code b{color:var(--acc);font-weight:400}
+button{background:#1d242c;color:var(--fg);border:1px solid var(--bd);border-radius:7px;padding:6px 12px;cursor:pointer;font:13px ui-sans-serif,system-ui}button:hover{border-color:var(--acc)}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:1.5px;color:var(--mut);margin:44px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px}.card b{display:block;margin-bottom:4px}.card p{margin:0;color:var(--mut);font-size:14px}
+pre{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;font:13px/1.6 ui-monospace,Menlo,monospace;overflow-x:auto;color:#c9d1d9}pre i{color:var(--mut);font-style:normal}
+footer{margin-top:56px;color:var(--mut);font-size:14px}a{color:var(--acc)}
+</style></head><body><main>
+<h1>traced<span>_</span></h1>
+<p class="lead">traceroute, который не врёт про города. ECMP, MPLS, SNI/DPI-пробы, geoip с проверкой по физике RTT, WHOIS/RDAP, живой MTR и карта.</p>
+<div class="cmd"><code>curl -sL <b>traced.nuv.cx</b> | sh -s -- 1.1.1.1</code><button onclick="navigator.clipboard.writeText('curl -sL traced.nuv.cx | sh -s -- 1.1.1.1');this.textContent='скопировано'">копировать</button></div>
+<h2>Без установки</h2>
+<pre><i># трасса (на linux без root — через sudo)</i>
+curl -sL traced.nuv.cx | sh -s -- 8.8.8.8
+<i># где фильтр режет SNI</i>
+curl -sL traced.nuv.cx | sh -s -- sni example.com
+<i># whois/rdap + dns + asn + geofeed</i>
+wget -qO- traced.nuv.cx | sh -s -- whois 1.1.1.1
+<i># живой mtr</i>
+curl -sL traced.nuv.cx | sh -s -- mtr 9.9.9.9</pre>
+<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.0.1</code>.</p>
+<h2>Что умеет</h2>
+<div class="grid">
+<div class="card"><b>Честный geoip</b><p>rDNS и коды IATA, IXP из PeeringDB, geofeed RFC 8805, RIPE IPmap — и отбраковка по скорости света: anycast-«Бангкок» за 9 мс не пройдёт.</p></div>
+<div class="card"><b>ECMP и MPLS</b><p>Несколько проб на хоп показывают балансировку, метки MPLS видны из ICMP-расширений, есть режим --paris.</p></div>
+<div class="card"><b>SNI/DPI-пробы</b><p>TLS ClientHello с нужным SNI по TTL: на каком хопе фильтр рвёт соединение.</p></div>
+<div class="card"><b>WHOIS/RDAP</b><p>Домены и IP: RDAP, WHOIS43, DNS, ASN через Cymru и RIPEstat.</p></div>
+<div class="card"><b>MTR и история</b><p>Живая статистика потерь, сохранённые трассы и diff между ними.</p></div>
+<div class="card"><b>Веб-карта</b><p>traced map — локальная карта на MapLibre GL с путями и хопами.</p></div>
+</div>
+<h2>Установка насовсем</h2>
+<pre>go install github.com/PalMeany/traced-cli/cmd/traced@latest
+<i># или бинарник со страницы релизов</i></pre>
+<footer><a href="https://github.com/PalMeany/traced-cli">github.com/PalMeany/traced-cli</a> · <a href="https://github.com/PalMeany/traced-cli/releases/latest">релизы</a></footer>
+</main></body></html>
