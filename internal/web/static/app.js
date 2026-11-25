@@ -1,6 +1,10 @@
-// traced web UI — local only. Traces never leave this machine; only map tiles
-// are fetched from the basemap CDN.
+// traced web UI. Locally (traced map/serve) traces never leave the machine;
+// only map tiles are fetched from the basemap CDN. The same code runs read-only
+// on the public share server (traced.nuv.cx/t/<id>), marked by
+// <html data-mode="share"> and <meta name="traced-share" content="<id>">.
 const $ = (s, el = document) => el.querySelector(s);
+const SHARE = document.documentElement.dataset.mode === 'share';
+const SHARE_ID = SHARE ? (document.querySelector('meta[name="traced-share"]')?.content || location.pathname.split('/').pop()) : '';
 const PALETTE = ['#5cc8ff', '#ff8a5c', '#b78cff', '#3ddc97', '#ffd35c', '#ff5da8', '#5cffe1', '#c0c8d4'];
 const STYLES = [
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -226,7 +230,7 @@ function renderDetails() {
   const box = $('#details');
   const tr = state.active === 'live' ? state.live : state.traces.get(state.active);
   if (!tr) {
-    box.innerHTML = '<div class="empty">Select a trace from history or run a new one.</div>';
+    box.innerHTML = `<div class="empty">${SHARE ? 'Loading trace…' : 'Select a trace from history or run a new one.'}</div>`;
     return;
   }
   const ex = tr.extra || {};
@@ -337,7 +341,7 @@ async function toggle(id, on) {
     state.selected = state.selected.filter((x) => x !== id);
     if (state.active === id) state.active = state.selected.at(-1) || null;
   }
-  history.replaceState(null, '', state.selected.length ? '#t=' + state.selected.join(',') : '#');
+  if (!SHARE) history.replaceState(null, '', state.selected.length ? '#t=' + state.selected.join(',') : '#');
   render();
 }
 
@@ -361,14 +365,15 @@ let raf = 0;
 function render() {
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => {
-    renderHistory();
+    if (!SHARE) renderHistory();
     renderMap();
     renderDetails();
-    renderDiff();
+    if (!SHARE) renderDiff();
   });
 }
 
 async function loadHistory() {
+  if (SHARE) return render();
   try {
     state.history = await api('/api/traces?limit=60');
   } catch (e) {
@@ -421,10 +426,38 @@ function startRun(form) {
 }
 
 // ---------------- boot ----------------
+async function bootShare() {
+  $('#run').remove();
+  $('#history').closest('section').remove();
+  $('#diffbox').remove();
+  document.body.classList.add('shared');
+  const note = document.createElement('div');
+  note.className = 'sharenote';
+  note.innerHTML = 'shared trace · run your own: <code>curl -sL traced.nuv.cx | sh -s -- 1.1.1.1</code> · <a href="/">traced.nuv.cx</a>';
+  $('.bar .brand').after(note);
+  api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')}`; }).catch(() => {});
+  initMap();
+  try {
+    const tr = await api('/api/traces/' + encodeURIComponent(SHARE_ID));
+    state.traces.set(SHARE_ID, tr);
+    state.selected = [SHARE_ID];
+    state.active = SHARE_ID;
+    const n = (tr.hops || []).length;
+    setStatus(`${tr.target} · ${n} hops · ${tr.reached ? 'reached' : 'not reached'}${tr.started ? ' · ' + new Date(tr.started).toLocaleString() : ''}`);
+    render();
+  } catch (e) {
+    setStatus(e.message.startsWith('404') ? 'trace not found or expired' : e.message, 'err');
+    $('#details').innerHTML = '<div class="empty">Trace not found or expired.</div>';
+  }
+}
+
+$('#colorByTrace').addEventListener('change', (e) => { state.colorByTrace = e.target.checked; render(); });
+if (SHARE) {
+  bootShare();
+} else {
 $('#run').addEventListener('submit', (e) => { e.preventDefault(); startRun(e.currentTarget); });
 $('#refresh').addEventListener('click', loadHistory);
-$('#colorByTrace').addEventListener('change', (e) => { state.colorByTrace = e.target.checked; render(); });
-api('/api/info').then((i) => { $('#ver').textContent = `v${i.version} · ${i.ixp_prefixes} IXP prefixes · ${i.cities} cities`; }).catch(() => {});
+api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')} · ${i.ixp_prefixes} IXP prefixes · ${i.cities} cities`; }).catch(() => {});
 
 initMap();
 (async () => {
@@ -436,3 +469,4 @@ initMap();
   }
   if (ids.length) { state.active = state.selected[0] || null; render(); }
 })();
+}

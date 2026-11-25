@@ -103,3 +103,9 @@ table.hops tr.hl td { background: #1b2a3a; }
   .layout { grid-template-columns: 1fr; grid-template-rows: 45vh auto auto; }
   .side { grid-row: auto; order: 3; }
 }
+
+/* read-only public share page */
+.sharenote { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; }
+.sharenote code { font-family: var(--mono); background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--text); }
+.sharenote a { color: var(--accent); }
+body.shared .status { max-width: 60ch; }

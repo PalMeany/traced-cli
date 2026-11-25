@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/geo"
+	"github.com/PalMeany/traced-cli/internal/share"
 	"github.com/PalMeany/traced-cli/internal/trace"
 )
 
@@ -38,6 +39,8 @@ type opts struct {
 	noScan                 bool
 	interval, sendGap      time.Duration
 	limit                  int
+	noShare                bool
+	shareURL               string
 }
 
 func newOpts(name string) *opts {
@@ -76,6 +79,12 @@ func newOpts(name string) *opts {
 	f.DurationVar(&o.interval, "i", time.Second, "mtr: interval between rounds")
 	f.DurationVar(&o.sendGap, "gap", 0, "pause between probe packets (default 12ms; raise it if an ISP polices ICMP)")
 	f.IntVar(&o.limit, "limit", 20, "history: number of entries")
+	f.BoolVar(&o.noShare, "no-share", envTrue("TRACED_NO_SHARE"), "do not upload the trace to the public map")
+	shareDef := os.Getenv("TRACED_SHARE_URL")
+	if shareDef == "" {
+		shareDef = share.DefaultURL
+	}
+	f.StringVar(&o.shareURL, "share-url", shareDef, "public map server for the share link")
 	f.Usage = func() {}
 	return o
 }
@@ -157,4 +166,13 @@ func parseOrigin(s string) (*geo.Point, error) {
 		return &geo.Point{Lat: c.Lat, Lon: c.Lon}, nil
 	}
 	return nil, fmt.Errorf("bad --origin %q (use \"lat,lon\" or a city/IATA code)", s)
+}
+
+// envTrue reads a boolean environment switch (1/true/yes/on).
+func envTrue(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on", "y":
+		return true
+	}
+	return false
 }

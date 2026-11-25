@@ -30,6 +30,9 @@ type Options struct {
 	Numeric  bool
 	Note     string
 	OpenMap  func(*trace.Result) (string, error)
+	// Final is called once after the view is closed with the last snapshot
+	// (geo applied), e.g. to publish it.
+	Final func(*trace.Result)
 }
 
 const histLen = 48
@@ -268,6 +271,15 @@ func Run(ctx context.Context, o Options) error {
 		m.mu.Lock()
 		m.render(os.Stdout, 0, 0, false)
 		m.mu.Unlock()
+		if o.Final != nil {
+			m.mu.Lock()
+			snap := m.snapshot()
+			m.applyGeo(snap, res)
+			m.mu.Unlock()
+			if len(snap.Hops) > 0 {
+				o.Final(snap)
+			}
+		}
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)

@@ -7,7 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +23,7 @@ import (
 	"github.com/PalMeany/traced-cli/internal/app"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/mtr"
+	"github.com/PalMeany/traced-cli/internal/share"
 	"github.com/PalMeany/traced-cli/internal/store"
 	"github.com/PalMeany/traced-cli/internal/trace"
 	"github.com/PalMeany/traced-cli/internal/ui"
@@ -38,6 +43,7 @@ usage:
   traced map [id...]               open the local web map (with traces preselected)
   traced serve [--listen addr]     run the web UI without opening a browser
   traced update-ixp                refresh the IXP prefix table from PeeringDB
+  traced share-server [flags]      public trace store + read-only map (what runs on traced.nuv.cx)
   traced version
 
 trace flags:
@@ -56,8 +62,11 @@ trace flags:
   --geofeed FILE|DIR  extra RFC 8805 CSV (also ~/.config/traced/geofeeds/*.csv)
   --origin LAT,LON|CODE  your location (improves RTT physics checks)
   -n                  numeric (no PTR names)   --no-whois  --no-save
+  --no-share          do not publish the trace (by default it is uploaded and a map
+                      link https://traced.nuv.cx/t/<id> is printed; kept 30 days)
+  --share-url URL     your own share server (traced share-server)
 
-env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, NO_COLOR
+env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, TRACED_NO_SHARE=1, TRACED_SHARE_URL, NO_COLOR
 data: history in ~/.local/share/traced, cache in ~/.cache/traced
 `
 
@@ -110,6 +119,8 @@ func run(args []string) error {
 		return nil
 	case "trace":
 		return cmdTrace(args[1:])
+	case "share-server":
+		return cmdShareServer(args[1:])
 	}
 	return cmdTrace(args)
 }
@@ -165,10 +176,17 @@ func cmdTrace(args []string) error {
 	if r == nil {
 		return err
 	}
+	link := ""
+	if !o.noShare && len(r.Hops) > 0 {
+		link = publish(o, r)
+	}
 	if o.jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(r)
+		return enc.Encode(struct {
+			*trace.Result
+			ShareURL string `json:"share_url,omitempty"`
+		}{r, link})
 	}
 	ex := app.ExtraOf(r)
 	ui.Anomalies(w, r)
@@ -181,6 +199,9 @@ func cmdTrace(args []string) error {
 				ui.Note(w, n)
 			}
 		}
+	}
+	if link != "" {
+		fmt.Fprintf(w, "\n%s %s\n", ui.C("\x1b[1m", "карта:"), ui.C("\x1b[36m", link))
 	}
 	if o.web && r.ID != "" {
 		return serveAndOpen(o, []string{r.ID})
@@ -410,6 +431,14 @@ func cmdMTR(args []string) error {
 	defer cancel()
 	return mtr.Run(ctx, mtr.Options{
 		Trace: topt, Geo: !o.noGeo, GeoOpts: gopt, Interval: o.interval, Numeric: o.numeric, Note: note,
+		Final: func(r *trace.Result) {
+			if o.noShare {
+				return
+			}
+			if link := publish(o, r); link != "" {
+				fmt.Fprintf(os.Stdout, "\n%s %s\n", ui.C("\x1b[1m", "карта:"), ui.C("\x1b[36m", link))
+			}
+		},
 		OpenMap: func(r *trace.Result) (string, error) {
 			if err := store.Default().Save(r); err != nil {
 				return "", err
@@ -423,4 +452,59 @@ func cmdMTR(args []string) error {
 			return url, nil
 		},
 	})
+}
+
+// publish uploads the trace to the public map and returns the link. Failures
+// are reported as one line on stderr and never fail the command.
+func publish(o *opts, r *trace.Result) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := share.Upload(ctx, o.shareURL, r)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, ui.C("\x1b[90m", "карта: не удалось загрузить трассу ("+err.Error()+"); --no-share отключает загрузку"))
+		return ""
+	}
+	return resp.URL
+}
+
+func cmdShareServer(args []string) error {
+	fs := flag.NewFlagSet("share-server", flag.ContinueOnError)
+	listen := fs.String("listen", "127.0.0.1:7480", "listen address")
+	dir := fs.String("dir", "/var/lib/traced-share", "storage directory")
+	public := fs.String("public-url", share.DefaultURL, "base URL of the links handed out")
+	ttl := fs.Duration("ttl", 30*24*time.Hour, "lifetime of a shared trace")
+	rate := fs.Int("rate", 30, "uploads per client IP per hour")
+	burst := fs.Int("burst", 10, "uploads per client IP at once")
+	maxMB := fs.Int64("max-mb", 2048, "total storage cap, MB")
+	trust := fs.Bool("trust-proxy", true, "take the peer address from X-Real-IP on loopback connections (local nginx)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	srv, err := share.NewServer(share.ServerOptions{Dir: *dir, PublicURL: *public, TTL: *ttl, Rate: *rate, Burst: *burst,
+		MaxBytes: *maxMB << 20, TrustProxy: *trust})
+	if err != nil {
+		return err
+	}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	hs := &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 32 << 10}
+	stop := make(chan struct{})
+	go srv.Run(stop)
+	ctx, cancel := signalCtx()
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		close(stop)
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		hs.Shutdown(sctx)
+	}()
+	log.Printf("traced %s share server on %s, dir %s, ttl %s, public %s", app.Version, ln.Addr(), *dir, *ttl, *public)
+	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }

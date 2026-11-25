@@ -28,7 +28,8 @@ curl -sL traced.nuv.cx | sh -s -- sni example.com
 wget -qO- traced.nuv.cx | sh -s -- whois 1.1.1.1
 <i># живой mtr</i>
 curl -sL traced.nuv.cx | sh -s -- mtr 9.9.9.9</pre>
-<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.0.1</code>.</p>
+<p style="color:var(--mut);font-size:14px">В конце трасса печатает ссылку на карту — <code>карта: https://traced.nuv.cx/t/…</code>: та же карта с хопами, ASN, городами и RTT, открывается в браузере и живёт 30 дней. Уходит только сама трасса; отключить — <code>--no-share</code> или <code>TRACED_NO_SHARE=1</code>.</p>
+<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.1.0</code>.</p>
 <h2>Что умеет</h2>
 <div class="grid">
 <div class="card"><b>Честный geoip</b><p>rDNS и коды IATA, IXP из PeeringDB, geofeed RFC 8805, RIPE IPmap — и отбраковка по скорости света: anycast-«Бангкок» за 9 мс не пройдёт.</p></div>
@@ -36,7 +37,7 @@ curl -sL traced.nuv.cx | sh -s -- mtr 9.9.9.9</pre>
 <div class="card"><b>SNI/DPI-пробы</b><p>TLS ClientHello с нужным SNI по TTL: на каком хопе фильтр рвёт соединение.</p></div>
 <div class="card"><b>WHOIS/RDAP</b><p>Домены и IP: RDAP, WHOIS43, DNS, ASN через Cymru и RIPEstat.</p></div>
 <div class="card"><b>MTR и история</b><p>Живая статистика потерь, сохранённые трассы и diff между ними.</p></div>
-<div class="card"><b>Веб-карта</b><p>traced map — локальная карта на MapLibre GL с путями и хопами.</p></div>
+<div class="card"><b>Веб-карта и ссылка</b><p>traced map — локальная карта на MapLibre GL с путями и хопами; после трассы — ссылка traced.nuv.cx/t/… на неё онлайн (--no-share — без ссылки).</p></div>
 </div>
 <h2>Установка насовсем</h2>
 <pre>go install github.com/PalMeany/traced-cli/cmd/traced@latest

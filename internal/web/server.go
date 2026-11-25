@@ -280,3 +280,10 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		send(trace.Event{Type: "error", Error: err.Error()})
 	}
 }
+
+// Static returns the embedded UI files (index.html, app.js, style.css); the
+// public share server reuses them in read-only mode.
+func Static() fs.FS {
+	sub, _ := fs.Sub(staticFS, "static")
+	return sub
+}

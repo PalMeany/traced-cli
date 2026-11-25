@@ -1,0 +1,40 @@
+# /etc/systemd/system/traced-share.service — public trace store behind traced.nuv.cx/t/
+[Unit]
+Description=traced share server (public trace map links)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=traced-share
+Group=traced-share
+ExecStart=/usr/local/bin/traced-share share-server --listen 127.0.0.1:7480 --dir /var/lib/traced-share --public-url https://traced.nuv.cx
+StateDirectory=traced-share
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
