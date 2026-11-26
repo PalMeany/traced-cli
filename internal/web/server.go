@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/backbone"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/store"
 	"github.com/PalMeany/traced-cli/internal/trace"
@@ -107,6 +108,8 @@ func Start(o Options) (*Server, error) {
 	mux.HandleFunc("/api/rep", s.handleRep)
 	mux.Handle("/api/cables", CableLayer("cables", 0))
 	mux.Handle("/api/landing", CableLayer("landing", 0))
+	mux.Handle("/api/backbones", BackboneLayer(true, 0))
+	mux.Handle("/api/backbone/parse", BackboneParse(ParseLimits{AllowSave: true, AllowLLM: true}))
 	s.srv = &http.Server{Handler: s.guard(mux), ReadHeaderTimeout: 10 * time.Second}
 	go s.srv.Serve(ln)
 	return s, nil
@@ -161,7 +164,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	src, n := geo.IXPSource()
 	writeJSON(w, map[string]any{"version": app.Version, "ixp_source": src, "ixp_prefixes": n, "cities": geo.CityCount(),
-		"domain": "traced.netkitty.dev", "intel": true})
+		"domain": "traced.netkitty.dev", "intel": true, "backbone_save": true, "backbone_llm": backbone.VisionFromEnv() != nil})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

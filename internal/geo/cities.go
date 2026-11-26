@@ -352,3 +352,6 @@ func LookupCityIn(name, cc string) *City {
 
 // CityCount returns the number of built-in locations.
 func CityCount() int { return len(allCities) }
+
+// Cities returns the built-in locations.
+func Cities() []*City { return allCities }

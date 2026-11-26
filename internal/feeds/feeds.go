@@ -955,3 +955,14 @@ func fetchDetails(ctx context.Context, base string, cables []Cable) map[string]*
 	wg.Wait()
 	return out
 }
+
+// PDBLocal returns the cached PeeringDB table without any download.
+func PDBLocal() *PeeringDB {
+	v, _ := loadOpt(context.Background(), "peeringdb", func(b []byte) (any, error) {
+		var db PeeringDB
+		err := json.Unmarshal(b, &db)
+		return &db, err
+	}, false)
+	db, _ := v.(*PeeringDB)
+	return db
+}

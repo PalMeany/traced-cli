@@ -46,6 +46,7 @@
       </div>
       <div class="lg">AS rep <span class="repdot ok"></span>clean <span class="repdot low"></span>low <span class="repdot mid"></span>susp. <span class="repdot bad"></span>dirty</div>
       <div class="lg"><span class="pt ix"></span>IX <span class="pt fac"></span>facility of an AS on the path</div>
+      <div class="lg"><span class="bbline"></span>backbone · bold = AS on path</div>
       <label class="chk"><input type="checkbox" id="colorByTrace"> color lines by route</label>
     </section>
   </aside>
@@ -54,6 +55,32 @@
     <div id="map" aria-label="route map"></div>
     <div id="layers" class="layers" role="group" aria-label="map layers"></div>
     <aside id="hopcard" class="hopcard card" hidden aria-live="polite"></aside>
+    <dialog id="bbimport" class="bbdialog" aria-labelledby="bbtitle">
+      <form id="bbform" method="dialog" autocomplete="off">
+        <h3 id="bbtitle">Импорт карты бэкбона</h3>
+        <p class="host">A provider's network map: PNG / JPEG / WebP or SVG <span id="bbmax"></span>. Raster maps need the map extent (region or bbox).</p>
+        <label>picture <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg" required></label>
+        <div class="row2">
+          <label>provider <input name="provider" required maxlength="80" placeholder="RETN" spellcheck="false"></label>
+          <label>ASN <input name="asn" inputmode="numeric" placeholder="9002" spellcheck="false"></label>
+        </div>
+        <div class="row2">
+          <label>engine <select name="engine"><option value="auto">auto</option><option value="cv">cv (raster)</option><option value="svg">svg</option><option value="llm">llm (vision)</option></select></label>
+          <label>region <select name="region"><option value="">— (svg labels / bbox)</option><option value="world">world</option><option value="europe">europe</option>
+            <option value="russia">russia</option><option value="us">us</option><option value="na">north america</option><option value="asia">asia</option><option value="latam">latin america</option></select></label>
+        </div>
+        <div class="row2">
+          <label>bbox <input name="bbox" placeholder="minLon,minLat,maxLon,maxLat" spellcheck="false"></label>
+          <label>projection <select name="proj"><option value="mercator">mercator</option><option value="equirect">equirect</option></select></label>
+        </div>
+        <div class="row2">
+          <label>line colour <input name="color" placeholder="auto or #e30613" spellcheck="false"></label>
+          <label id="bbsaverow" class="chk"><input type="checkbox" name="save" value="1"> save as a layer</label>
+        </div>
+        <div id="bberr" class="bberr" role="status"></div>
+        <div class="actions"><button type="button" id="bbcancel" class="ghost">Cancel</button><button type="submit">Parse</button></div>
+      </form>
+    </dialog>
     <div id="mapfail" class="mapfail" hidden>Map library could not be loaded (offline?). Tables still work.</div>
   </div>
 

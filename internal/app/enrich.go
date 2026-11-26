@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/asn"
+	"github.com/PalMeany/traced-cli/internal/backbone"
 	"github.com/PalMeany/traced-cli/internal/feeds"
 	"github.com/PalMeany/traced-cli/internal/rep"
 	"github.com/PalMeany/traced-cli/internal/trace"
@@ -164,4 +165,29 @@ func CableHints(db *feeds.CableDB, hops []trace.Hop) []SegmentCables {
 		}
 	}
 	return out
+}
+
+// BackboneHints lists the terrestrial backbones (built-in dataset and user
+// layers) of the ASes on the path and the backbone links that could join
+// consecutive hops of one AS.
+func BackboneHints(layers []*backbone.FeatureCollection, hops []trace.Hop) []backbone.Hint {
+	if len(layers) == 0 {
+		return nil
+	}
+	var pts []backbone.HopPoint
+	for i := range hops {
+		for j := range hops[i].Responders {
+			a := ASOf(&hops[i].Responders[j])
+			if a == nil || a.ASN <= 0 {
+				continue
+			}
+			p := backbone.HopPoint{TTL: hops[i].TTL, ASN: a.ASN}
+			if g := InfoOf(&hops[i].Responders[j]); g != nil && g.Located && !g.Private {
+				p.Lat, p.Lon, p.Located, p.Label = g.Lat, g.Lon, true, g.Label()
+			}
+			pts = append(pts, p)
+			break
+		}
+	}
+	return backbone.Hints(layers, pts)
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/backbone"
 	"github.com/PalMeany/traced-cli/internal/cache"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/mtr"
@@ -42,6 +43,7 @@ usage:
   traced whois <domain|ip>         RDAP/WHOIS + DNS + ASN + geofeed + reputation
   traced asn <ASN|ip|domain>       provider profile: PeeringDB, CAIDA rank/cone, BGP prefixes, eyeballs
   traced rep <ip|ASN|domain>       reputation: Kinetio, Spamhaus DROP/ZEN, FireHOL, ET, Tor, AbuseIPDB
+  traced backbone parse|list|import|remove   terrestrial provider backbones from map pictures (traced backbone help)
   traced feeds [update [name…]]    open data cache: cables, PeeringDB, APNIC, reputation lists
   traced history [--limit N]       stored traces
   traced diff <id1> <id2>          compare two traces (ids, unique prefixes or 1 = newest)
@@ -79,6 +81,7 @@ asn / rep / whois flags:
 
 env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, TRACED_NO_SHARE=1, TRACED_SHARE_URL, NO_COLOR,
      ABUSEIPDB_API_KEY (optional AbuseIPDB check), PEERINGDB_API_KEY (higher PeeringDB limits),
+     TRACED_VISION_API_KEY/_BASE_URL/_MODEL or GEMINI_API_KEY (traced backbone parse --engine llm),
      TRACED_DNSBL_RESOLVER=ip[:port] (own resolver for Spamhaus ZEN), TRACED_DNSBL=0, TRACED_FEEDS_AUTO=0
 data: history in ~/.local/share/traced, cache and feeds in ~/.cache/traced
 `
@@ -95,6 +98,7 @@ func signalCtx() (context.Context, context.CancelFunc) {
 }
 
 func run(args []string) error {
+	backbone.Version = app.Version
 	if len(args) == 0 {
 		fmt.Print(usage)
 		return nil
@@ -140,6 +144,8 @@ func run(args []string) error {
 		return cmdTrace(args[1:])
 	case "share-server":
 		return cmdShareServer(args[1:])
+	case "backbone", "backbones", "bb":
+		return cmdBackbone(args[1:])
 	}
 	return cmdTrace(args)
 }

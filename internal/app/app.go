@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"github.com/PalMeany/traced-cli/internal/backbone"
 	"net"
 	"strings"
 	"sync"
@@ -37,8 +38,9 @@ type Config struct {
 type Extra struct {
 	Whois     *whois.Report         `json:"whois,omitempty"`
 	SNI       *trace.SNIResult      `json:"sni,omitempty"`
-	ASNs      map[string]*asn.Brief `json:"asns,omitempty"`   // AS profiles keyed by number
-	Cables    []SegmentCables       `json:"cables,omitempty"` // submarine cable hints (heuristic)
+	ASNs      map[string]*asn.Brief `json:"asns,omitempty"`      // AS profiles keyed by number
+	Cables    []SegmentCables       `json:"cables,omitempty"`    // submarine cable hints (heuristic)
+	Backbones []backbone.Hint       `json:"backbones,omitempty"` // terrestrial backbones of ASes on the path
 	Interface string                `json:"interface,omitempty"`
 	Tunnel    string                `json:"tunnel,omitempty"`
 	Notes     []string              `json:"notes,omitempty"`
@@ -216,6 +218,7 @@ func Run(ctx context.Context, cfg Config, emit func(trace.Event)) (*trace.Result
 	}
 	if cfg.Geo {
 		ex.Cables = CableHints(feeds.CablesLocal(), r.Hops)
+		ex.Backbones = BackboneHints(backbone.All(true), r.Hops)
 	}
 	r.Extra = ex
 	if cfg.Save {

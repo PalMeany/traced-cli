@@ -40,6 +40,9 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
   - switchable layers: **Submarine cables (ВОЛС)** with a popup (name, length, RFS, owners, landing stations), **Landing points**, and **IX / PoP** — exchanges and facilities of every AS on the route (from PeeringDB)
   - clicking a hop (table row, `ASxxxx` in a marker popup) opens the **AS card**: CAIDA rank and cone, PeeringDB type/traffic/ratio/policy, prefixes, eyeballs and the reputation verdict
   - **cable hints** for long segments (≥ 1000 km): cables that land near both ends are named in the segment popup and highlighted on the map. This is a heuristic — nothing proves the packets used that cable
+  - layer **Terrestrial backbones (наземные)**: land backbones of large providers (built-in dataset + your own layers), one colour per provider, a filter by provider / ASN, a popup per segment (provider, ASN, cities A — B, capacity label, source, how it was parsed). When the trace enters an AS whose backbone is known, that backbone is drawn in bold and the links joining consecutive hops of the AS glow (heuristic, like the cable hints)
+  - **Импорт карты…** in the layer panel: upload a provider's network map picture (PNG/JPEG/WebP/SVG), it is parsed by `traced backbone` on the server and shown at once; locally it can be saved as a layer, on the public map it stays in your browser session only
+- **Backbones from map pictures** (`traced backbone`): see [below](#terrestrial-backbones).
 
 - **Online map link:** after a trace (and when you quit `traced mtr`) the result is published and a link is printed — `карта: https://traced.netkitty.dev/t/<id>`. The page is the same map in read-only mode: hops, ASN, cities, RTT, the path and the hop table. Links live 30 days. `--no-share` or `TRACED_NO_SHARE=1` turns it off; `--share-url` points to your own `traced share-server`.
 
@@ -84,6 +87,7 @@ traced whois <domain|ip>         RDAP/WHOIS + DNS + ASN + geofeed + reputation
 traced asn <ASN|ip|domain>       provider profile: PeeringDB, CAIDA rank/cone, BGP prefixes, eyeballs
 traced rep <ip|ASN|domain>       reputation: Kinetio, Spamhaus DROP/ZEN, FireHOL, ET, Tor, AbuseIPDB
 traced feeds [update [name…]]    open data cache: cables, PeeringDB, APNIC, reputation lists
+traced backbone parse|list|import|remove|export   terrestrial provider backbones from map pictures
 traced history [--limit N]       stored traces
 traced diff <id1> <id2>          compare two traces (ids, unique prefixes or 1 = newest)
 traced map [id...]               open the local web map (with traces preselected)
@@ -117,7 +121,8 @@ Common flags:
 
 Environment variables: `TRACED_IPINFO_TOKEN`, `TRACED_MMDB`, `TRACED_IFACE`, `TRACED_ORIGIN`, `TRACED_NO_SHARE`, `TRACED_SHARE_URL`, `NO_COLOR`,
 `ABUSEIPDB_API_KEY` (optional AbuseIPDB check), `PEERINGDB_API_KEY` (higher PeeringDB limits), `TRACED_DNSBL_RESOLVER=ip[:port]`,
-`TRACED_DNSBL=0` (no ZEN queries), `TRACED_FEEDS_AUTO=0` (never refresh feeds on use), `TRACED_CACHE_DIR`.
+`TRACED_DNSBL=0` (no ZEN queries), `TRACED_FEEDS_AUTO=0` (never refresh feeds on use), `TRACED_CACHE_DIR`,
+`TRACED_VISION_API_KEY` / `TRACED_VISION_BASE_URL` / `TRACED_VISION_MODEL` (OpenAI-compatible vision API) or `GEMINI_API_KEY` (+ `TRACED_GEMINI_MODEL`) for `traced backbone parse --engine llm`.
 With `--json` the link is added as the `share_url` field.
 History is stored in `~/.local/share/traced/traces/*.json`. The cache (RDAP, PTR, ASN, IPmap, GeoIP, geofeeds, PeeringDB) lives in `~/.cache/traced/`, the open data feeds in `~/.cache/traced/feeds/`.
 Your own geofeeds can be dropped into `~/.config/traced/geofeeds/*.csv`.
@@ -254,6 +259,32 @@ traced rep AS13335 --json
 traced feeds                      # what is cached, how old
 ```
 
+## Terrestrial backbones
+
+`traced backbone` turns a provider's network map picture into a graph — cities / PoPs (GeoJSON `Point`) and the links between them (`LineString`), with `provider`, `asn`, `source` and `parsed_by` in the properties — and keeps it as a map layer.
+
+```sh
+traced backbone parse cogent-europe.png --provider Cogent --asn 174 --save          # vision LLM when a key is set
+traced backbone parse map.png --provider X --asn 64500 --engine cv --region europe --color '#e30613' --out x.geojson
+traced backbone parse map.png --provider X --engine cv --gcp 812,377=37.62,55.75 --gcp 120,240=-0.13,51.51 --proj equirect
+traced backbone parse https://example.net/network.svg --provider X --save          # SVG: paths, dots and city labels
+traced backbone import Cogentco.gml --provider Cogent --asn 174 --max-link-km 2500   # Internet Topology Zoo graph
+traced backbone import links.json --provider X   # {"links":[{"from":"Frankfurt","to":"Amsterdam","label":"400G"}]}
+traced backbone list | remove <id> | export [id…] --out all.geojson
+```
+
+Engines (`--engine auto` = `svg` for SVG, else `llm` when a key is configured, else `cv`):
+
+| engine | how | needs |
+|---|---|---|
+| `llm` | a vision model reads the marked cities (with their marker positions) and the drawn links as strict JSON. Cities are geocoded: built-in telecom hub dictionary → PeeringDB facility cities → Nominatim (cached in `~/.cache/traced/geocache.json`). The hubs anchor the picture: a namesake far from where the picture puts the city ("Garden City" NY vs KS) is swapped for the nearest Nominatim match or dropped. Nothing is invented — names that do not geocode are listed, not placed. | `TRACED_VISION_API_KEY` (+ `_BASE_URL`, `_MODEL`, any OpenAI-compatible endpoint) or `GEMINI_API_KEY` |
+| `cv` | local, pure Go: colour mask (`--color`, or the most line-like saturated colour), 1-px gap closing, Zhang-Suen thinning, skeleton → junction/end nodes and polylines, spur pruning, chain merging, junction refinement (least-squares intersection of the branches), Douglas-Peucker, pixels → lon/lat. Nodes at or near known hubs get their names. | a geographic reference: `--bbox minLon,minLat,maxLon,maxLat`, `--region world\|europe\|russia\|us\|na\|asia\|latam`, or `--gcp px,py=lon,lat` (2 points: scale + offset, 3+: affine); `--proj mercator\|equirect` |
+| `svg` | local: stroked `path`/`line`/`polyline` of the backbone colour (CSS classes, `style`, transforms, curves sampled), `circle` markers as nodes (a path through several markers is split there), `text` labels name the nodes. Without `--bbox/--region/--gcp` the city labels reference the map by themselves (robust affine fit, Pacific-centred maps supported). | — |
+
+Layers live in `~/.cache/traced/backbones/*.geojson`; the web map and the trace hints pick them up automatically (a user layer replaces a built-in one with the same id).
+
+**Built-in dataset** (`internal/backbone/data/backbones.json.gz`, built by `go run ./tools/bbdataset` from [`dataset/backbones/`](dataset/backbones/); every layer is re-validated, and named nodes must lie near the city their name geocodes to). Sources and dates are in [`dataset/backbones/SOURCES.md`](dataset/backbones/SOURCES.md). Routes on operator maps are often schematic — the layer shows which cities a provider connects, not the exact fibre path.
+
 ## How it works
 
 - **Engine** (`internal/trace`):
@@ -272,10 +303,12 @@ traced feeds                      # what is cached, how old
   - Host and Origin are checked, which blocks DNS rebinding and cross-site requests to `/api/run`.
   - Traces stream over Server-Sent Events.
   - `/api/cables` and `/api/landing` serve the cable map as gzip'ed GeoJSON with an ETag; `/api/asn`, `/api/rep`, `/api/feeds` back the AS card.
+  - `/api/backbones` serves the built-in + user backbone layers (merged GeoJSON with a `layers` index); `POST /api/backbone/parse` (multipart: `file`, `provider`, `asn`, `engine`, `region`, `bbox`, `gcp`, `proj`, `color`, `tolerance`, `save`) parses a picture and answers `{layer, saved}`.
 - **Share server** (`internal/share`, `traced share-server`): what runs behind https://traced.netkitty.dev.
   - `POST /api/traces` takes a trace (≤ 512 KB), re-decodes it into the fixed schema (unknown fields and local details dropped), stores it under a random 10-char base62 id; `GET /api/traces/<id>` returns the JSON, `GET /t/<id>` the read-only map (same embedded UI).
   - Traces expire after 30 days (`--ttl`), an hourly sweep deletes them; total size is capped (`--max-mb`).
   - It keeps its own copy of the cable map in `<dir>/cache` (refreshed weekly) for the cable layers of shared maps; AS cards on shared maps use the profiles stored with the trace.
+  - `/t/map` is the public map without a trace (cables + backbone dataset). `GET /api/backbones` serves the built-in dataset; `POST /api/backbone/parse` takes pictures ≤ 4 MB / 16 Mpx (20 per hour per IP, two at a time, cv/svg engines; the vision engine only with `TRACED_PUBLIC_LLM=1` and a key) and never stores the result — the browser keeps it in `sessionStorage`. Give that location a bigger `client_max_body_size` in nginx (see `deploy/`).
   - Rate limit per client IP (`--rate`/`--burst`, IPv6 per /64). `CF-Connecting-IP` is trusted only when the peer is a Cloudflare edge address; behind a local nginx the peer comes from `X-Real-IP`.
   - Run your own: `traced share-server --listen 127.0.0.1:7480 --dir /var/lib/traced-share --public-url https://your.host`, proxy `/t/` and `/api/` to it, then `traced --share-url https://your.host 1.1.1.1`. A systemd unit and nginx snippet are in [`deploy/`](deploy/).
 
@@ -285,13 +318,15 @@ traced feeds                      # what is cached, how old
 - **Linux:** unprivileged ping sockets do not receive the ICMP errors traceroute needs. Run traced as root, or give the binary the capability: `sudo setcap cap_net_raw+ep $(which traced)`. It will then use raw sockets, and that mode also decodes MPLS labels.
 - **Rate limits:** the free ip-api endpoint allows 45 requests per minute. Results are cached for 7 days, so repeated traces are instant. Anonymous PeeringDB API access is limited to a few requests per hour (`Retry-After` of ~40 minutes); traced therefore uses the weekly bulk feed and remembers a 429 instead of retrying. RIPEstat `routing-status` can take more than 15 s for very large networks; it is then reported as `partial`.
 - **Spamhaus ZEN** does not answer queries that arrive through public resolvers (8.8.8.8, 1.1.1.1, many VPN/Tailscale DNS setups). Point `TRACED_DNSBL_RESOLVER` at a recursive resolver of your own.
-- **Data licences:** the submarine cable map is © TeleGeography (CC BY-NC-SA 3.0), PeeringDB data is under its AUP, Spamhaus DROP lists are free for use under their terms, APNIC Labs data is reusable with attribution.
+- **Data licences:** the backbone layers are derived from the operators' public network maps (© the operators), the Internet Topology Zoo (CC BY) and the ComNews "Backbone Networks in Russia" poster (© ComNews Group, attribution required); see `dataset/backbones/SOURCES.md`. The submarine cable map is © TeleGeography (CC BY-NC-SA 3.0), PeeringDB data is under its AUP, Spamhaus DROP lists are free for use under their terms, APNIC Labs data is reusable with attribution.
 
 ## Development
 
 ```sh
 make test    # unit tests: packet/MPLS parser, rDNS/IATA, IXP, RFC 8805, RTT physics, ECMP/diff, RDAP/WHOIS, MTR stats, web guard, share server,
-             # feed parsers (Kinetio, Spamhaus, netset, APNIC, cables, PeeringDB), IP/CIDR/ASN matching, reputation and ASN aggregation
+             # feed parsers (Kinetio, Spamhaus, netset, APNIC, cables, PeeringDB), IP/CIDR/ASN matching, reputation and ASN aggregation,
+             # backbone CV (synthetic PNG), SVG, LLM (mock HTTP), geocoder, GML, hints, parse API
+go run ./tools/bbdataset   # rebuild the built-in backbone dataset from dataset/backbones/*.geojson
 make build
 make cross   # linux/darwin × amd64/arm64 into dist/
 ```

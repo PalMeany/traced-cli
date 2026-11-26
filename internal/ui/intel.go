@@ -415,6 +415,19 @@ func PathIntel(w io.Writer, r *trace.Result) {
 			fmt.Fprintf(w, "  hop %d→%d %s → %s %s: %s\n", s.FromTTL, s.ToTTL, s.From, s.To, C(gray, fmt.Sprintf("%.0f km", s.Km)), strings.Join(names, ", "))
 		}
 	}
+	if len(ex.Backbones) > 0 {
+		fmt.Fprintln(w, C(bold, "\nTerrestrial backbones")+C(gray, " (the path enters ASes whose backbone map is known; traced map shows them)"))
+		for _, b := range ex.Backbones {
+			var hops []string
+			for _, t := range b.TTLs {
+				hops = append(hops, strconv.Itoa(t))
+			}
+			fmt.Fprintf(w, "  %s %s %s\n", C(cyan, Pad(fmt.Sprintf("AS%d", b.ASN), 9)), Pad(Trunc(b.Provider, 30), 30), C(gray, "hops "+strings.Join(hops, ",")))
+			for _, l := range b.Links {
+				fmt.Fprintf(w, "    hop %d→%d ≈ %s — %s %s\n", l.FromTTL, l.ToTTL, orDash(l.From), orDash(l.To), C(gray, fmt.Sprintf("(ends %.0f km off)", l.Distance)))
+			}
+		}
+	}
 }
 
 // RepBrief is one line for whois.

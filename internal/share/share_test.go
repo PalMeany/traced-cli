@@ -227,3 +227,47 @@ func TestNewID(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestPublicBackbones(t *testing.T) {
+	s, err := NewServer(ServerOptions{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/api/backbones")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fc struct {
+		Type   string           `json:"type"`
+		Layers []map[string]any `json:"layers"`
+	}
+	json.NewDecoder(resp.Body).Decode(&fc)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || fc.Type != "FeatureCollection" || resp.Header.Get("Cache-Control") != "public, max-age=3600" {
+		t.Fatalf("%d %+v", resp.StatusCode, fc)
+	}
+	// a big upload is refused before parsing
+	big := strings.NewReader(strings.Repeat("x", PublicParseBytes+200<<10))
+	resp, err = http.Post(ts.URL+"/api/backbone/parse", "multipart/form-data; boundary=zz", big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 413 && resp.StatusCode != 400 {
+		t.Fatalf("big upload: %d", resp.StatusCode)
+	}
+}
+
+func TestPublicMapPage(t *testing.T) {
+	s, err := NewServer(ServerOptions{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/t/map", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `content="map"`) || !strings.Contains(rec.Body.String(), "/t/assets/app.js") {
+		t.Fatalf("%d %.300s", rec.Code, rec.Body.String())
+	}
+}

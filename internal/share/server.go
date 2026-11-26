@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/backbone"
 	"github.com/PalMeany/traced-cli/internal/feeds"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/web"
@@ -45,9 +46,13 @@ type Server struct {
 	page  string // index.html prepared for share mode
 	mux   *http.ServeMux
 	lim   *limiter
+	plim  *limiter // backbone picture parses
 	mu    sync.Mutex
 	total int64
 }
+
+// PublicParseBytes caps pictures uploaded to the public map importer.
+const PublicParseBytes = 4 << 20
 
 const idLen = 10
 const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -110,16 +115,23 @@ func NewServer(o ServerOptions) (*Server, error) {
 	page = strings.Replace(page, `<html lang="en">`, `<html lang="en" data-mode="share">`, 1)
 	page = strings.Replace(page, `href="style.css"`, `href="/t/assets/style.css"`, 1)
 	page = strings.Replace(page, `src="app.js"`, `src="/t/assets/app.js"`, 1)
-	s := &Server{o: o, page: page, lim: newLimiter(o.Rate, o.Burst, o.Now)}
+	s := &Server{o: o, page: page, lim: newLimiter(o.Rate, o.Burst, o.Now), plim: newLimiter(20, 5, o.Now)}
 	s.Sweep()
 	mux := http.NewServeMux()
 	mux.Handle("GET /t/assets/", http.StripPrefix("/t/assets/", http.FileServer(http.FS(web.Static()))))
+	mux.HandleFunc("GET /t/map", s.handleMap)
 	mux.HandleFunc("GET /t/{id}", s.handlePage)
 	mux.HandleFunc("POST /api/traces", s.handleUpload)
 	mux.HandleFunc("GET /api/traces/{id}", s.handleGet)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.Handle("GET /api/cables", web.CableLayer("cables", 86400))
 	mux.Handle("GET /api/landing", web.CableLayer("landing", 86400))
+	// terrestrial backbones: the built-in dataset only; pictures uploaded on
+	// the public map are parsed and handed back, never stored here
+	mux.Handle("GET /api/backbones", web.BackboneLayer(false, 3600))
+	mux.Handle("POST /api/backbone/parse", web.BackboneParse(web.ParseLimits{MaxBytes: PublicParseBytes, MaxPixels: 16_000_000,
+		MaxSide: 1800, AllowLLM: os.Getenv("TRACED_PUBLIC_LLM") == "1", Timeout: 90 * time.Second,
+		Allow: func(r *http.Request) bool { return s.plim.allow(s.ClientIP(r)) }}))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	s.mux = mux
 	return s, nil
@@ -152,6 +164,7 @@ func (s *Server) Run(stop <-chan struct{}) {
 			s.Sweep()
 			s.lim.gc()
 			go s.refreshCables()
+			s.plim.gc()
 		}
 	}
 }
@@ -334,7 +347,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	src, n := geo.IXPSource()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"version": app.Version, "ixp_source": src, "ixp_prefixes": n,
-		"cities": geo.CityCount(), "share": true, "ttl_days": int(s.o.TTL.Hours() / 24)})
+		"cities": geo.CityCount(), "share": true, "ttl_days": int(s.o.TTL.Hours() / 24),
+		"backbone_parse_mb": PublicParseBytes >> 20, "backbone_llm": os.Getenv("TRACED_PUBLIC_LLM") == "1" && backbone.VisionFromEnv() != nil})
 }
 
 const notFoundPage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -374,6 +388,19 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		html.EscapeString(title), html.EscapeString(desc), html.EscapeString(title), html.EscapeString(desc),
 		html.EscapeString(s.publicBase(r)+"/t/"+id), html.EscapeString(id))
 	page := strings.Replace(s.page, "<title>traced — route map</title>", meta, 1)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	io.WriteString(w, page)
+}
+
+// handleMap is the public map without a trace: submarine cables, the
+// terrestrial backbone dataset and the picture importer.
+func (s *Server) handleMap(w http.ResponseWriter, r *http.Request) {
+	meta := `<title>traced — backbone & cable map</title>
+<meta name="description" content="Terrestrial Internet backbones of major providers and submarine cables on one map; import a provider's network map picture.">
+<meta property="og:title" content="traced — backbone & cable map">
+<meta name="traced-share" content="map">`
+	page := strings.Replace(s.page, "<title>traced — route map</title>", meta, 1)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	io.WriteString(w, page)
 }

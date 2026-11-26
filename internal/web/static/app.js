@@ -5,6 +5,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const SHARE = document.documentElement.dataset.mode === 'share';
 const SHARE_ID = SHARE ? (document.querySelector('meta[name="traced-share"]')?.content || location.pathname.split('/').pop()) : '';
+const SHARE_MAP = SHARE && SHARE_ID === 'map'; // public map without a trace (traced.netkitty.dev/t/map)
 const PALETTE = ['#5cc8ff', '#ff8a5c', '#b78cff', '#3ddc97', '#ffd35c', '#ff5da8', '#5cffe1', '#c0c8d4'];
 const STYLES = [
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -98,12 +99,13 @@ function initMap() {
         'circle-stroke-color': '#0b0f14', 'circle-stroke-width': 1.2, 'circle-opacity': 0.9 } });
     bindIntelEvents();
     if (layerOn('cables') || layerOn('landing')) loadCables();
+    if (layerOn('backbones')) loadBackbones();
     render();
   });
 }
 
 // ---------------- overlay layers: submarine cables, landing points, IX / PoP ----------------
-const LAYERS = { cables: 'Submarine cables (ВОЛС)', landing: 'Landing points', pops: 'IX / PoP' };
+const LAYERS = { cables: 'Submarine cables (ВОЛС)', backbones: 'Terrestrial backbones (наземные)', landing: 'Landing points', pops: 'IX / PoP' };
 const layerState = (() => { try { return JSON.parse(localStorage.getItem('traced.layers') || '{}'); } catch { return {}; } })();
 const layerOn = (k) => !!layerState[k];
 let cablesLoaded = null; // promise
@@ -121,6 +123,23 @@ function addIntelLayers() {
     paint: { 'line-color': ['coalesce', ['get', 'color'], '#4a90b8'], 'line-width': 3.5, 'line-opacity': 0.95 } });
   map.addLayer({ id: 'cables-hit', type: 'line', source: 'cables', layout: { visibility: vis('cables') },
     paint: { 'line-color': '#000', 'line-width': 8, 'line-opacity': 0.001 } });
+  // terrestrial backbones: one colour per provider, the path's providers in bold
+  map.addSource('backbones', { type: 'geojson', data: emptyFC() });
+  const isLink = ['==', ['geometry-type'], 'LineString'];
+  map.addLayer({ id: 'bb-lines', type: 'line', source: 'backbones', filter: isLink, layout: { visibility: vis('backbones'), 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.9, 6, 2.2], 'line-opacity': 0.7 } });
+  map.addLayer({ id: 'bb-hint', type: 'line', source: 'backbones', filter: ['all', isLink, ['in', ['get', 'slug'], ['literal', []]]],
+    layout: { visibility: vis('backbones'), 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 2, 6, 3.6], 'line-opacity': 0.95 } });
+  map.addLayer({ id: 'bb-hint-link', type: 'line', source: 'backbones', filter: ['all', isLink, ['in', ['get', 'lid'], ['literal', []]]],
+    layout: { visibility: vis('backbones'), 'line-cap': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-opacity': 0.55, 'line-blur': 1.5 } });
+  map.addLayer({ id: 'bb-nodes', type: 'circle', source: 'backbones', filter: ['==', ['geometry-type'], 'Point'], minzoom: 2.5,
+    layout: { visibility: vis('backbones') },
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2.5, 1.6, 7, 3.5], 'circle-color': ['get', 'color'], 'circle-stroke-color': '#0b0f14',
+      'circle-stroke-width': 0.8, 'circle-opacity': 0.9 } });
+  map.addLayer({ id: 'bb-hit', type: 'line', source: 'backbones', filter: isLink, layout: { visibility: vis('backbones') },
+    paint: { 'line-color': '#000', 'line-width': 9, 'line-opacity': 0.001 } });
   map.addLayer({ id: 'landing', type: 'circle', source: 'landing', layout: { visibility: vis('landing') },
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 1.6, 6, 4], 'circle-color': '#9fd3ff', 'circle-stroke-color': '#0b0f14',
       'circle-stroke-width': 0.8, 'circle-opacity': 0.85 } });
@@ -149,6 +168,12 @@ function bindIntelEvents() {
     const seen = new Set();
     return fs.filter((f) => !seen.has(f.properties.id) && seen.add(f.properties.id)).slice(0, 3).map((f) => cableHTML(f.properties)).join('');
   });
+  pop('bb-hit', (p, fs) => {
+    const seen = new Set();
+    return fs.filter((f) => !seen.has(f.properties.lid) && seen.add(f.properties.lid)).slice(0, 3).map((f) => backboneHTML(f.properties)).join('');
+  });
+  pop('bb-nodes', (p) => `<div class="pop"><h4 style="color:${esc(p.color)}">${esc(p.name || 'PoP')}</h4><div class="host">${esc(p.provider)}${p.asn ? ' · AS' + p.asn : ''}${p.country ? ' · ' + esc(p.country) : ''}</div>
+    <div class="host">position: ${esc(p.geo || 'map')}</div></div>`);
   pop('landing', (p) => `<div class="pop"><h4>${esc(p.name)}</h4><div class="host">landing station · ${p.n} cable${p.n === 1 ? '' : 's'}</div>
     <div>${esc(String(p.cables || '').split('; ').slice(0, 14).join('; '))}</div></div>`);
   pop('pops', (p) => `<div class="pop"><h4>${esc(p.name)}</h4><div class="host">${p.kind === 'ix' ? 'Internet exchange' : 'facility / data centre'} · ${esc([p.city, p.cc].filter(Boolean).join(', '))}</div>
@@ -159,8 +184,9 @@ function setLayer(k, on) {
   layerState[k] = on;
   try { localStorage.setItem('traced.layers', JSON.stringify(layerState)); } catch { /* private mode */ }
   if (!map || !mapReady) return;
-  const ids = k === 'cables' ? ['cables', 'cables-hint', 'cables-hit'] : [k];
+  const ids = k === 'cables' ? ['cables', 'cables-hint', 'cables-hit'] : k === 'backbones' ? BB_LAYERS : [k];
   for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  if (k === 'backbones') { $('#bbpanel').hidden = !on; if (on) loadBackbones(); }
   if (on && (k === 'cables' || k === 'landing')) loadCables();
   if (on && k === 'pops') { ensurePathASNs(); renderPoPs(); }
 }
@@ -180,8 +206,201 @@ function loadCables() {
 function initLayerControl() {
   const box = $('#layers');
   if (!box) return;
-  box.innerHTML = Object.entries(LAYERS).map(([k, t]) => `<label class="chk"><input type="checkbox" data-layer="${k}" ${layerOn(k) ? 'checked' : ''}> ${esc(t)}</label>`).join('');
+  box.innerHTML = Object.entries(LAYERS).map(([k, t]) => `<label class="chk"><input type="checkbox" data-layer="${k}" ${layerOn(k) ? 'checked' : ''}> ${esc(t)}</label>`
+    + (k === 'backbones' ? `<div id="bbpanel" class="bbpanel" ${layerOn('backbones') ? '' : 'hidden'}>
+      <input id="bbq" type="search" placeholder="filter: provider or AS…" aria-label="filter backbones by provider or ASN" spellcheck="false">
+      <div id="bblist" class="bblist"></div>
+      <button type="button" id="bbimportbtn" class="ghost small">Импорт карты…</button></div>` : '')).join('');
   box.querySelectorAll('input[data-layer]').forEach((cb) => cb.addEventListener('change', () => setLayer(cb.dataset.layer, cb.checked)));
+  $('#bbq').addEventListener('input', (e) => { bb.query = e.target.value.trim().toLowerCase(); applyBBFilter(); renderBBList(); });
+  $('#bbimportbtn').addEventListener('click', openImport);
+}
+
+// ---------------- terrestrial backbones ----------------
+const BB_LAYERS = ['bb-lines', 'bb-hint', 'bb-hint-link', 'bb-nodes', 'bb-hit'];
+const BB_SESSION_PALETTE = ['#ff9f1c', '#2ec4b6', '#e71d36', '#a2d729', '#f72585', '#4361ee'];
+const bb = {
+  loaded: null,       // promise
+  server: null,       // merged FeatureCollection from /api/backbones
+  session: (() => { try { return JSON.parse(sessionStorage.getItem('traced.bb.session') || '[]'); } catch { return []; } })(),
+  hidden: new Set((() => { try { return JSON.parse(localStorage.getItem('traced.bb.hidden') || '[]'); } catch { return []; } })()),
+  query: '',
+  layers: [],         // metas (server + session)
+};
+
+function backboneHTML(p) {
+  const ends = [p.from, p.to].filter(Boolean).join(' — ');
+  const hint = bbHintFor(p.lid);
+  return `<div class="pop"><h4 style="color:${esc(p.color)}">${esc(p.provider)}${p.asn ? ` <button type="button" class="link" data-asn="${p.asn}">AS${p.asn}</button>` : ''}</h4>
+    ${kv([['link', ends || 'segment'], ['label', p.label], ['source', p.source], ['parsed by', p.parsed_by + (p.builtin ? ' · built-in dataset' : p.session ? ' · this browser session' : ' · user layer')]])}
+    ${hint ? `<div class="hint">trace hops ${hint.from_ttl}→${hint.to_ttl} may run here <span class="host">(heuristic, ends ${Math.round(hint.km)} km off)</span></div>` : ''}</div>`;
+}
+
+function sessionFeatures() {
+  const feats = [];
+  bb.session.forEach((fc, i) => {
+    const col = BB_SESSION_PALETTE[i % BB_SESSION_PALETTE.length];
+    const slug = fc.traced.slug;
+    let li = 0;
+    for (const f of fc.features || []) {
+      const p = { ...f.properties, color: col, slug, session: true };
+      if (f.geometry.type === 'LineString') p.lid = `${slug}:${li++}`;
+      feats.push({ type: 'Feature', geometry: f.geometry, properties: p });
+    }
+  });
+  return feats;
+}
+
+function bbData() {
+  const server = bb.server || { features: [], layers: [] };
+  const sess = new Set(bb.session.map((fc) => fc.traced.slug));
+  const feats = server.features.filter((f) => !sess.has(f.properties.slug)).concat(sessionFeatures());
+  bb.layers = (server.layers || []).filter((m) => !sess.has(m.slug))
+    .concat(bb.session.map((fc, i) => ({ ...fc.traced, color: BB_SESSION_PALETTE[i % BB_SESSION_PALETTE.length], session: true })));
+  return { type: 'FeatureCollection', features: feats };
+}
+
+function refreshBB() {
+  if (!map || !mapReady || !map.getSource('backbones')) return;
+  map.getSource('backbones').setData(bbData());
+  applyBBFilter();
+  renderBBList();
+  renderHints();
+}
+
+function loadBackbones(force) {
+  if (bb.loaded && !force) return bb.loaded;
+  bb.loaded = api('/api/backbones').then((d) => {
+    bb.server = d;
+    refreshBB();
+    const n = (d.layers || []).length + bb.session.length;
+    setStatus(`${n} terrestrial backbone layer${n === 1 ? '' : 's'}`);
+  }).catch((e) => { bb.loaded = null; setStatus('backbones: ' + e.message, 'err'); });
+  return bb.loaded;
+}
+
+const bbMatches = (m) => !bb.query || m.provider.toLowerCase().includes(bb.query) || (m.asn && ('as' + m.asn).includes(bb.query.replace(/^as\s*/, 'as')))
+  || (m.asn && String(m.asn) === bb.query);
+
+function visibleSlugs() { return bb.layers.filter((m) => !bb.hidden.has(m.slug) && bbMatches(m)).map((m) => m.slug); }
+
+function applyBBFilter() {
+  if (!map || !mapReady || !map.getLayer('bb-lines')) return;
+  const vis = ['in', ['get', 'slug'], ['literal', visibleSlugs()]];
+  const isLink = ['==', ['geometry-type'], 'LineString'];
+  map.setFilter('bb-lines', ['all', isLink, vis]);
+  map.setFilter('bb-hit', ['all', isLink, vis]);
+  map.setFilter('bb-nodes', ['all', ['==', ['geometry-type'], 'Point'], vis]);
+}
+
+function renderBBList() {
+  const box = $('#bblist');
+  if (!box) return;
+  const hinted = new Set(bbHints().map((h) => h.slug));
+  const ls = bb.layers.filter(bbMatches);
+  box.innerHTML = ls.length ? ls.map((m) => `<label class="chk bbrow${hinted.has(m.slug) ? ' on-path' : ''}" title="${esc([m.source, m.parsed_by].filter(Boolean).join(' · '))}">
+    <input type="checkbox" data-bb="${esc(m.slug)}" ${bb.hidden.has(m.slug) ? '' : 'checked'}><span class="sw" style="background:${esc(m.color)}"></span>
+    ${esc(m.provider)}${m.asn ? ` <span class="host">AS${m.asn}</span>` : ''}${m.session ? ' <span class="host">· session</span>' : ''}${hinted.has(m.slug) ? ' <span class="badge onpath">on path</span>' : ''}
+    ${m.session ? `<button type="button" class="ghost x" data-bbdrop="${esc(m.slug)}" title="remove from this session">×</button>` : ''}</label>`).join('')
+    : `<div class="host">${bb.layers.length ? 'no match' : 'no layers'}</div>`;
+  box.querySelectorAll('input[data-bb]').forEach((cb) => cb.addEventListener('change', () => {
+    cb.checked ? bb.hidden.delete(cb.dataset.bb) : bb.hidden.add(cb.dataset.bb);
+    try { localStorage.setItem('traced.bb.hidden', JSON.stringify([...bb.hidden])); } catch { /* private mode */ }
+    applyBBFilter();
+  }));
+  box.querySelectorAll('[data-bbdrop]').forEach((b) => b.addEventListener('click', (e) => {
+    e.preventDefault();
+    bb.session = bb.session.filter((fc) => fc.traced.slug !== b.dataset.bbdrop);
+    saveSession();
+    refreshBB();
+  }));
+}
+
+function saveSession() {
+  try { sessionStorage.setItem('traced.bb.session', JSON.stringify(bb.session)); } catch { setStatus('session storage full: the layer stays until reload', 'err'); }
+}
+
+// hints: from the trace (server matched links) or, for older traces, by ASN
+function bbHints(tr = activeTrace()) {
+  const ex = tr?.extra?.backbones;
+  if (ex?.length) return ex;
+  if (!tr) return [];
+  const asns = new Set(pathASNs(tr));
+  const out = [];
+  for (const m of bb.layers) if (m.asn && asns.has(m.asn)) {
+    const ttls = [];
+    for (const h of tr.hops || []) if ((h.responders || []).some((r) => r.net?.asn === m.asn)) ttls.push(h.ttl);
+    out.push({ slug: m.slug, provider: m.provider, asn: m.asn, ttls, links: [] });
+  }
+  return out;
+}
+function bbHintFor(lid) {
+  for (const h of bbHints()) for (const l of h.links || []) if (l.lid === lid) return l;
+  return null;
+}
+
+// ---- import dialog: upload a provider map picture, parse it on the server, show the layer ----
+function openImport() {
+  const dlg = $('#bbimport');
+  if (!dlg) return;
+  $('#bbsaverow').hidden = SHARE || !serverInfo.backbone_save;
+  const eng = dlg.querySelector('select[name=engine]');
+  eng.querySelector('option[value=llm]').disabled = !serverInfo.backbone_llm;
+  $('#bbmax').textContent = serverInfo.backbone_parse_mb ? `≤ ${serverInfo.backbone_parse_mb} MB` : '';
+  $('#bberr').textContent = '';
+  dlg.showModal();
+}
+
+async function submitImport(form) {
+  const fd = new FormData(form);
+  const f = fd.get('file');
+  if (!f || !f.size) return void ($('#bberr').textContent = 'choose a picture');
+  if (serverInfo.backbone_parse_mb && f.size > serverInfo.backbone_parse_mb * 1048576) return void ($('#bberr').textContent = `file too large (limit ${serverInfo.backbone_parse_mb} MB)`);
+  for (const [k, v] of [...fd]) if (typeof v === 'string' && !v.trim()) fd.delete(k);
+  const btn = form.querySelector('button[type=submit]');
+  btn.disabled = true;
+  $('#bberr').textContent = 'parsing…';
+  try {
+    const r = await fetch('/api/backbone/parse', { method: 'POST', body: fd, headers: { Accept: 'application/json' } });
+    const d = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    const fc = d.layer;
+    if (d.saved) {
+      await loadBackbones(true);
+    } else {
+      bb.session = bb.session.filter((x) => x.traced.slug !== fc.traced.slug).concat([fc]);
+      saveSession();
+    }
+    if (!layerOn('backbones')) { setLayer('backbones', true); $('input[data-layer=backbones]').checked = true; }
+    refreshBB();
+    bb.hidden.delete(fc.traced.slug);
+    fitFeatures(fc.features);
+    const notes = (fc.traced.notes || []).join(' · ');
+    setStatus(`${fc.traced.provider}: ${fc.traced.nodes} nodes · ${fc.traced.links} links (${fc.traced.parsed_by})${d.saved ? ' · saved' : ' · kept in this browser session'}${notes ? ' · ' + notes : ''}${d.note ? ' · ' + d.note : ''}`);
+    $('#bbimport').close();
+  } catch (e) {
+    $('#bberr').textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function fitFeatures(fs) {
+  if (!map || !fs?.length) return;
+  const b = new maplibregl.LngLatBounds();
+  for (const f of fs) {
+    const c = f.geometry.coordinates;
+    if (f.geometry.type === 'Point') b.extend(c); else for (const p of c) b.extend(p);
+  }
+  if (!b.isEmpty()) map.fitBounds(b, { padding: 60, maxZoom: 7, duration: 600 });
+}
+
+let serverInfo = {};
+function initImport() {
+  const form = $('#bbform');
+  if (!form) return;
+  form.addEventListener('submit', (e) => { e.preventDefault(); submitImport(form); });
+  $('#bbcancel').addEventListener('click', () => $('#bbimport').close());
 }
 
 // ---------------- AS profiles (embedded in the trace, or fetched locally) ----------------
@@ -248,6 +467,12 @@ function renderHints() {
   if (!map || !mapReady || !map.getLayer('cables-hint')) return;
   const ids = [...new Set(hintsOf(activeTrace()).flatMap((s) => s.cables.map((c) => c.id)))];
   map.setFilter('cables-hint', ['in', ['get', 'id'], ['literal', ids]]);
+  if (!map.getLayer('bb-hint')) return;
+  const hs = bbHints();
+  const isLink = ['==', ['geometry-type'], 'LineString'];
+  map.setFilter('bb-hint', ['all', isLink, ['in', ['get', 'slug'], ['literal', hs.map((h) => h.slug)]]]);
+  map.setFilter('bb-hint-link', ['all', isLink, ['in', ['get', 'lid'], ['literal', hs.flatMap((h) => (h.links || []).map((l) => l.lid))]]]);
+  renderBBList();
 }
 
 const REP_CLASS = { 'Clean': 'ok', 'Low risk': 'low', 'Suspicious': 'mid', 'Dirty': 'bad' };
@@ -633,6 +858,13 @@ function renderDetails() {
       `${esc(c.name)} <span class="host">(${esc(c.from)} ${Math.round(c.from_km)} km · ${esc(c.to)} ${Math.round(c.to_km)} km${c.rfs ? ' · RFS ' + esc(c.rfs) : ''})</span>`).join('<br>')}</div></div>`).join('')}
       <p class="host">Cables landing near both ends of a long segment. Nothing proves the traffic uses them; turn on “Submarine cables” to see them highlighted.</p></div>`);
   }
+  const bh = bbHints(tr);
+  if (bh.length) {
+    cards.push(`<div class="card wide"><h3>Terrestrial backbones · heuristic</h3>${bh.map((h) => `<div class="hintrow"><b>${esc(h.provider)}</b>
+      <button type="button" class="link" data-asn="${h.asn}">AS${h.asn}</button> <span class="host">hops ${esc(ranges(h.ttls || []))}</span>
+      ${(h.links || []).map((l) => `<div>hop ${l.from_ttl}→${l.to_ttl} ≈ ${esc(l.from || '?')} — ${esc(l.to || '?')} <span class="host">(ends ${Math.round(l.km)} km off)</span></div>`).join('')}</div>`).join('')}
+      <p class="host">The path enters ASes whose backbone map is in the dataset. ${layerOn('backbones') ? 'Their backbones are drawn in bold, matching links glow.' : 'Turn on “Terrestrial backbones” to see them.'}</p></div>`);
+  }
   const asns = pathASNs(tr);
   if (asns.some((a) => briefOf(a))) {
     cards.push(`<div class="card wide"><h3>AS on the path</h3><table class="aslist">${asns.map((a) => {
@@ -830,9 +1062,18 @@ async function bootShare() {
   note.className = 'sharenote';
   note.innerHTML = 'shared trace · run your own: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code> · <a href="/">traced.netkitty.dev</a>';
   $('.bar .brand').after(note);
-  api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')}`; }).catch(() => {});
+  api('/api/info').then((i) => { serverInfo = i; $('#ver').textContent = `v${String(i.version).replace(/^v/, '')}`; }).catch(() => {});
+  if (SHARE_MAP && !('backbones' in layerState)) layerState.backbones = true;
   initLayerControl();
+  initImport();
   initMap();
+  if (SHARE_MAP) {
+    note.innerHTML = 'backbone &amp; cable map · trace your own route: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code> · <a href="/">traced.netkitty.dev</a>';
+    $('#details').innerHTML = `<div class="empty">Terrestrial backbones of large providers (built-in dataset) and submarine cables — toggle them top left.
+      “Импорт карты…” parses a provider's network map picture (PNG/JPEG/WebP/SVG) and keeps the layer in this browser session only.</div>`;
+    setStatus('backbone & cable map');
+    return;
+  }
   try {
     const tr = await api('/api/traces/' + encodeURIComponent(SHARE_ID));
     state.traces.set(SHARE_ID, tr);
@@ -853,9 +1094,10 @@ if (SHARE) {
 } else {
 $('#run').addEventListener('submit', (e) => { e.preventDefault(); startRun(e.currentTarget); });
 $('#refresh').addEventListener('click', loadHistory);
-api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')} · ${i.ixp_prefixes} IXP prefixes · ${i.cities} cities`; }).catch(() => {});
+api('/api/info').then((i) => { serverInfo = i; $('#ver').textContent = `v${String(i.version).replace(/^v/, '')} · ${i.ixp_prefixes} IXP prefixes · ${i.cities} cities`; }).catch(() => {});
 
 initLayerControl();
+initImport();
 initMap();
 (async () => {
   const m = location.hash.match(/t=([^&]+)/);
