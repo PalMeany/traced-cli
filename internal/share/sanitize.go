@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/asn"
 	"github.com/PalMeany/traced-cli/internal/trace"
 )
 
@@ -19,6 +20,9 @@ const (
 	maxResponders = 32
 	maxProbes     = 64
 	maxRTTs       = 32
+	maxASNs       = 16
+	maxPoPs       = 40
+	maxCableSegs  = 10
 )
 
 // Sanitize returns a copy of r that holds only the trace itself: hops,
@@ -77,12 +81,35 @@ func Sanitize(r *trace.Result) (*trace.Result, error) {
 		out.Hops[i] = nh
 	}
 	out.Extra = nil
-	if ex := app.ExtraOf(r); ex != nil && (ex.Whois != nil || ex.SNI != nil) {
+	if ex := app.ExtraOf(r); ex != nil && (ex.Whois != nil || ex.SNI != nil || len(ex.ASNs) > 0 || len(ex.Cables) > 0) {
 		ne := &app.Extra{SNI: ex.SNI}
 		if w := ex.Whois; w != nil {
 			cw := *w
 			cw.Errors = nil
 			ne.Whois = &cw
+		}
+		// public AS profiles of the path (no local lookup errors)
+		for k, b := range ex.ASNs {
+			if b == nil || len(ne.ASNs) >= maxASNs {
+				continue
+			}
+			if ne.ASNs == nil {
+				ne.ASNs = map[string]*asn.Brief{}
+			}
+			cb := *b
+			cb.Errors = nil
+			if len(cb.PoPs) > maxPoPs {
+				cb.PoPs = cb.PoPs[:maxPoPs]
+			}
+			if len(cb.RepNotes) > 8 {
+				cb.RepNotes = cb.RepNotes[:8]
+			}
+			ne.ASNs[k] = &cb
+		}
+		if len(ex.Cables) > maxCableSegs {
+			ne.Cables = ex.Cables[:maxCableSegs]
+		} else {
+			ne.Cables = ex.Cables
 		}
 		out.Extra = ne
 	}

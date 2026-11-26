@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/PalMeany/traced-cli/internal/asn"
+	"github.com/PalMeany/traced-cli/internal/feeds"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/store"
 	"github.com/PalMeany/traced-cli/internal/trace"
@@ -16,7 +18,7 @@ import (
 )
 
 // Version of traced.
-var Version = "1.1.2"
+var Version = "1.2.0"
 
 // Config describes one trace job.
 type Config struct {
@@ -28,15 +30,18 @@ type Config struct {
 	ControlSNI string
 	Save       bool
 	Tunnel     string // set when the caller already resolved Interface="auto"
+	ASN        bool   // profile every AS on the path (rank, traffic, PoPs, reputation)
 }
 
 // Extra is attached to Result.Extra.
 type Extra struct {
-	Whois     *whois.Report    `json:"whois,omitempty"`
-	SNI       *trace.SNIResult `json:"sni,omitempty"`
-	Interface string           `json:"interface,omitempty"`
-	Tunnel    string           `json:"tunnel,omitempty"`
-	Notes     []string         `json:"notes,omitempty"`
+	Whois     *whois.Report         `json:"whois,omitempty"`
+	SNI       *trace.SNIResult      `json:"sni,omitempty"`
+	ASNs      map[string]*asn.Brief `json:"asns,omitempty"`   // AS profiles keyed by number
+	Cables    []SegmentCables       `json:"cables,omitempty"` // submarine cable hints (heuristic)
+	Interface string                `json:"interface,omitempty"`
+	Tunnel    string                `json:"tunnel,omitempty"`
+	Notes     []string              `json:"notes,omitempty"`
 }
 
 // ResolveInterface handles the "auto" interface mode. It returns the
@@ -118,6 +123,10 @@ func Run(ctx context.Context, cfg Config, emit func(trace.Event)) (*trace.Result
 		slots []*slot
 		data  = map[string]*geo.IPData{}
 	)
+	var enr *enricher
+	if cfg.ASN && cfg.Geo && !cfg.GeoOpts.Offline {
+		enr = newEnricher(ctx, emit)
+	}
 	out := make(chan *slot, 64)
 	var pwg sync.WaitGroup
 	pwg.Add(1)
@@ -134,6 +143,9 @@ func Run(ctx context.Context, cfg Config, emit func(trace.Event)) (*trace.Result
 			}
 			h := hops[len(hops)-1]
 			emit(trace.Event{Type: "hop", Hop: &h})
+			if enr != nil {
+				enr.add(&h)
+			}
 		}
 	}()
 	var start *trace.Result
@@ -196,6 +208,15 @@ func Run(ctx context.Context, cfg Config, emit func(trace.Event)) (*trace.Result
 		}
 	}
 	wwg.Wait()
+	if enr != nil {
+		ex.ASNs = enr.finish(r.Hops)
+		if len(ex.ASNs) > 0 {
+			emit(trace.Event{Type: "asns", Data: ex.ASNs})
+		}
+	}
+	if cfg.Geo {
+		ex.Cables = CableHints(feeds.CablesLocal(), r.Hops)
+	}
 	r.Extra = ex
 	if cfg.Save {
 		if serr := store.Default().Save(r); serr != nil {

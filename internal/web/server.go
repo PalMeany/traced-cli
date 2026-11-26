@@ -102,6 +102,11 @@ func Start(o Options) (*Server, error) {
 	mux.HandleFunc("/api/diff", s.handleDiff)
 	mux.HandleFunc("/api/whois", s.handleWhois)
 	mux.HandleFunc("/api/run", s.handleRun)
+	mux.HandleFunc("/api/feeds", s.handleFeeds)
+	mux.HandleFunc("/api/asn", s.handleASN)
+	mux.HandleFunc("/api/rep", s.handleRep)
+	mux.Handle("/api/cables", CableLayer("cables", 0))
+	mux.Handle("/api/landing", CableLayer("landing", 0))
 	s.srv = &http.Server{Handler: s.guard(mux), ReadHeaderTimeout: 10 * time.Second}
 	go s.srv.Serve(ln)
 	return s, nil
@@ -156,7 +161,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	src, n := geo.IXPSource()
 	writeJSON(w, map[string]any{"version": app.Version, "ixp_source": src, "ixp_prefixes": n, "cities": geo.CityCount(),
-		"domain": "traced.netkitty.dev"})
+		"domain": "traced.netkitty.dev", "intel": true})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

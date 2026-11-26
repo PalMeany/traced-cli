@@ -66,6 +66,7 @@ function initMap() {
     const dim = ['boolean', ['feature-state', 'dim'], false];
     const width = ['case', hl, ['*', ['get', 'w'], 2], ['get', 'w']];
     const opacity = (base) => ['case', hl, 1, dim, 0.18, base];
+    addIntelLayers();
     map.addSource('arcs', { type: 'geojson', data: emptyFC() });
     map.addLayer({ id: 'arcs-glow', type: 'line', source: 'arcs', filter: ['!', ['get', 'dashed']],
       paint: { 'line-color': ['get', 'color'], 'line-width': ['*', width, 4], 'line-opacity': ['case', hl, 0.35, dim, 0.03, 0.12], 'line-blur': 3 } });
@@ -91,9 +92,209 @@ function initMap() {
       const f = e.features?.[0];
       if (f) pin([f.id], { lngLat: e.lngLat, scroll: true });
     });
+    // overlays above the route: PoPs
+    map.addLayer({ id: 'pops', type: 'circle', source: 'pops', layout: { visibility: layerOn('pops') ? 'visible' : 'none' },
+      paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'ix'], 5, 3.5], 'circle-color': ['case', ['==', ['get', 'kind'], 'ix'], '#ffb547', '#b78cff'],
+        'circle-stroke-color': '#0b0f14', 'circle-stroke-width': 1.2, 'circle-opacity': 0.9 } });
+    bindIntelEvents();
+    if (layerOn('cables') || layerOn('landing')) loadCables();
     render();
   });
 }
+
+// ---------------- overlay layers: submarine cables, landing points, IX / PoP ----------------
+const LAYERS = { cables: 'Submarine cables (ВОЛС)', landing: 'Landing points', pops: 'IX / PoP' };
+const layerState = (() => { try { return JSON.parse(localStorage.getItem('traced.layers') || '{}'); } catch { return {}; } })();
+const layerOn = (k) => !!layerState[k];
+let cablesLoaded = null; // promise
+
+function addIntelLayers() {
+  const vis = (k) => (layerOn(k) ? 'visible' : 'none');
+  map.addSource('cables', { type: 'geojson', data: emptyFC() });
+  map.addSource('landing', { type: 'geojson', data: emptyFC() });
+  map.addSource('pops', { type: 'geojson', data: emptyFC() });
+  map.addLayer({ id: 'cables', type: 'line', source: 'cables', layout: { visibility: vis('cables'), 'line-join': 'round' },
+    paint: { 'line-color': ['coalesce', ['get', 'color'], '#4a90b8'], 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.8, 6, 2],
+      'line-opacity': ['case', ['get', 'planned'], 0.25, 0.5] } });
+  map.addLayer({ id: 'cables-hint', type: 'line', source: 'cables', filter: ['in', ['get', 'id'], ['literal', []]],
+    layout: { visibility: vis('cables'), 'line-join': 'round' },
+    paint: { 'line-color': ['coalesce', ['get', 'color'], '#4a90b8'], 'line-width': 3.5, 'line-opacity': 0.95 } });
+  map.addLayer({ id: 'cables-hit', type: 'line', source: 'cables', layout: { visibility: vis('cables') },
+    paint: { 'line-color': '#000', 'line-width': 8, 'line-opacity': 0.001 } });
+  map.addLayer({ id: 'landing', type: 'circle', source: 'landing', layout: { visibility: vis('landing') },
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 1.6, 6, 4], 'circle-color': '#9fd3ff', 'circle-stroke-color': '#0b0f14',
+      'circle-stroke-width': 0.8, 'circle-opacity': 0.85 } });
+}
+
+function cableHTML(p) {
+  const st = String(p.stations || '').split('; ').filter(Boolean);
+  const more = st.length > 12 ? ` … +${st.length - 12}` : '';
+  return `<div class="pop"><h4 style="color:${esc(p.color || '#9fd3ff')}">${esc(p.name)}</h4>${kv([['length', p.length], ['RFS', p.rfs + (p.planned ? ' (planned)' : '')],
+    ['owners', p.owners], ['stations', st.slice(0, 12).join('; ') + more]])}
+    ${p.url ? `<div class="host"><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.url)}</a></div>` : ''}
+    <div class="host">© TeleGeography submarinecablemap.com</div></div>`;
+}
+
+function bindIntelEvents() {
+  const pop = (layer, html) => {
+    map.on('click', layer, (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      new maplibregl.Popup({ offset: 8, maxWidth: '380px' }).setLngLat(e.lngLat).setHTML(html(f.properties, e.features)).addTo(map);
+    });
+    map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+  };
+  pop('cables-hit', (p, fs) => {
+    const seen = new Set();
+    return fs.filter((f) => !seen.has(f.properties.id) && seen.add(f.properties.id)).slice(0, 3).map((f) => cableHTML(f.properties)).join('');
+  });
+  pop('landing', (p) => `<div class="pop"><h4>${esc(p.name)}</h4><div class="host">landing station · ${p.n} cable${p.n === 1 ? '' : 's'}</div>
+    <div>${esc(String(p.cables || '').split('; ').slice(0, 14).join('; '))}</div></div>`);
+  pop('pops', (p) => `<div class="pop"><h4>${esc(p.name)}</h4><div class="host">${p.kind === 'ix' ? 'Internet exchange' : 'facility / data centre'} · ${esc([p.city, p.cc].filter(Boolean).join(', '))}</div>
+    <div><button type="button" class="link" data-asn="${p.asn}">AS${p.asn}</button> ${esc(p.asname || '')}${p.speed ? ` · ${esc(p.speed)}` : ''}</div></div>`);
+}
+
+function setLayer(k, on) {
+  layerState[k] = on;
+  try { localStorage.setItem('traced.layers', JSON.stringify(layerState)); } catch { /* private mode */ }
+  if (!map || !mapReady) return;
+  const ids = k === 'cables' ? ['cables', 'cables-hint', 'cables-hit'] : [k];
+  for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  if (on && (k === 'cables' || k === 'landing')) loadCables();
+  if (on && k === 'pops') { ensurePathASNs(); renderPoPs(); }
+}
+
+function loadCables() {
+  if (cablesLoaded) return cablesLoaded;
+  setStatus('loading submarine cable map…', 'live');
+  cablesLoaded = Promise.all([api('/api/cables'), api('/api/landing')]).then(([c, l]) => {
+    map.getSource('cables').setData(c);
+    map.getSource('landing').setData(l);
+    setStatus(`${c.features.length} submarine cables · ${l.features.length} landing points (TeleGeography)`);
+    renderHints();
+  }).catch((e) => { cablesLoaded = null; setStatus('cable map: ' + e.message, 'err'); });
+  return cablesLoaded;
+}
+
+function initLayerControl() {
+  const box = $('#layers');
+  if (!box) return;
+  box.innerHTML = Object.entries(LAYERS).map(([k, t]) => `<label class="chk"><input type="checkbox" data-layer="${k}" ${layerOn(k) ? 'checked' : ''}> ${esc(t)}</label>`).join('');
+  box.querySelectorAll('input[data-layer]').forEach((cb) => cb.addEventListener('change', () => setLayer(cb.dataset.layer, cb.checked)));
+}
+
+// ---------------- AS profiles (embedded in the trace, or fetched locally) ----------------
+const asnInfo = new Map(); // asn -> brief | {loading} | {error}
+const activeTrace = () => (state.active === 'live' ? state.live : state.traces.get(state.active));
+
+function briefOf(asn) {
+  const tr = activeTrace();
+  // a fresh local lookup beats a profile embedded with errors (e.g. a source was rate limited)
+  return asnInfo.get(asn)?.brief || tr?.extra?.asns?.[String(asn)] || null;
+}
+
+async function fetchASN(asn) {
+  if (SHARE || !asn) return null;
+  const cur = asnInfo.get(asn);
+  if (cur?.brief || cur?.loading) return cur.loading || cur.brief;
+  const p = api('/api/asn?q=AS' + asn).then((d) => { asnInfo.set(asn, { brief: d.brief, report: d.report }); return d.brief; })
+    .catch((e) => { asnInfo.set(asn, { error: e.message }); return null; });
+  asnInfo.set(asn, { loading: p });
+  return p;
+}
+
+function pathASNs(tr) {
+  const out = [];
+  for (const h of tr?.hops || []) for (const r of h.responders || []) {
+    const a = r.net?.asn;
+    if (a && !out.includes(a) && !(a >= 64512 && a <= 65535)) out.push(a);
+  }
+  return out;
+}
+
+async function ensurePathASNs() {
+  const tr = activeTrace();
+  if (!tr || SHARE) return;
+  const missing = pathASNs(tr).filter((a) => {
+    const e = tr.extra?.asns?.[String(a)];
+    return !asnInfo.has(a) && (!e || (e.errors || []).length);
+  }).slice(0, 10);
+  if (!missing.length) return;
+  await Promise.all(missing.map(fetchASN));
+  renderPoPs();
+  renderDetails();
+  if (cardFor) showASNCard(cardFor.asn, cardFor.hop);
+}
+
+function renderPoPs() {
+  if (!map || !mapReady || !map.getSource('pops')) return;
+  const feats = [];
+  const tr = activeTrace();
+  for (const a of pathASNs(tr)) {
+    const b = briefOf(a);
+    for (const p of b?.pops || []) {
+      feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        properties: { kind: p.kind, name: p.name, city: p.city || '', cc: p.cc || '', asn: a, asname: b.name || '',
+          speed: p.speed_mbps ? (p.speed_mbps >= 1000 ? p.speed_mbps / 1000 + 'G' : p.speed_mbps + 'M') : '' } });
+    }
+  }
+  map.getSource('pops').setData({ type: 'FeatureCollection', features: feats });
+}
+
+// cable hints of the active trace: thick lines + segment popups
+function hintsOf(tr) { return tr?.extra?.cables || []; }
+function renderHints() {
+  if (!map || !mapReady || !map.getLayer('cables-hint')) return;
+  const ids = [...new Set(hintsOf(activeTrace()).flatMap((s) => s.cables.map((c) => c.id)))];
+  map.setFilter('cables-hint', ['in', ['get', 'id'], ['literal', ids]]);
+}
+
+const REP_CLASS = { 'Clean': 'ok', 'Low risk': 'low', 'Suspicious': 'mid', 'Dirty': 'bad' };
+const repBadge = (b) => (b?.rep ? `<span class="badge rep ${REP_CLASS[b.rep] || ''}" title="${esc((b.rep_notes || []).join('\n') || 'no listings')}">${esc(b.rep)}</span>` : '');
+const human = (n) => !n ? '0' : n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+
+function asnCardHTML(asn, hop) {
+  const b = briefOf(asn);
+  const st = asnInfo.get(asn);
+  const head = `<h3>AS${asn}${hop ? ` · hop ${hop.ttl}` : ''} <button type="button" class="ghost close" aria-label="close">×</button></h3>`;
+  if (!b) {
+    const msg = st?.error ? esc(st.error) : SHARE ? 'no AS profile in this trace' : 'loading PeeringDB · CAIDA · RIPEstat · APNIC…';
+    return head + `<div class="host">${msg}</div>`;
+  }
+  const users = b.users ? `${human(b.users)} (${(b.users_pct_cc || 0).toFixed(2)}% of ${esc(b.users_cc)}, ${(b.users_pct_world || 0).toFixed(3)}% world)` : '';
+  return head + `<div class="asname">${esc(b.name || '')} ${repBadge(b)}</div>${kv([
+    ['org', [b.org, b.country].filter(Boolean).join(' · ')],
+    ['CAIDA rank', b.rank ? `#${b.rank}${b.clique ? ' · tier-1 clique' : ''}` : ''],
+    ['cone', b.cone_asns ? `${human(b.cone_asns)} AS · ${human(b.cone_prefixes)} prefixes` : ''],
+    ['degree', b.rank ? `${b.providers || 0} up · ${b.peers || 0} peers · ${b.customers || 0} cust` : ''],
+    ['type', b.type], ['traffic', b.traffic], ['ratio', b.ratio], ['policy', b.policy],
+    ['prefixes', b.prefixes_v4 || b.prefixes_v6 ? `${b.prefixes_v4} v4 · ${b.prefixes_v6} v6${b.addresses_v4 ? ' · ' + human(b.addresses_v4) + ' addr' : ''}` : ''],
+    ['eyeballs', users], ['presence', b.ix_count || b.fac_count ? `${b.ix_count} IX · ${b.fac_count} facilities` : ''],
+    ['reputation', b.rep ? `${b.rep} (${b.rep_score || 0}/100)` : ''], ['listings', b.rep_notes], ['errors', b.errors]])}`;
+}
+
+let cardFor = null; // {asn, ttl}
+function showASNCard(asn, hop) {
+  const el = $('#hopcard');
+  if (!el || !asn) return;
+  cardFor = { asn, hop };
+  el.hidden = false;
+  el.innerHTML = asnCardHTML(asn, hop);
+  el.querySelector('.close')?.addEventListener('click', () => { el.hidden = true; cardFor = null; });
+  const stale = (briefOf(asn)?.errors || []).length && !asnInfo.has(asn);
+  if ((!briefOf(asn) || stale) && !SHARE && !asnInfo.get(asn)?.error) {
+    fetchASN(asn).then(() => { if (cardFor?.asn === asn) showASNCard(asn, hop); renderPoPs(); });
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest?.('[data-asn]');
+  if (!t) return;
+  e.preventDefault();
+  e.stopPropagation();
+  showASNCard(+t.dataset.asn, t.dataset.ttl ? { ttl: +t.dataset.ttl } : null);
+});
 
 function addArrowImage() {
   if (map.hasImage('arrow')) return;
@@ -261,7 +462,9 @@ function buildMapData() {
 function popupHTML(n) {
   const rows = n.items.sort((a, b) => a.id.localeCompare(b.id) || a.ttl - b.ttl).map(({ color, ttl, r, target }) => {
     const g = r.geo || {};
+    const a = r.net?.asn;
     return `<tr><td><b style="color:${color}">●</b></td><td class="num">${ttl}</td><td class="mono">${esc(r.ip)}<div class="host">${esc(r.host || '')}</div></td>
+      <td>${a ? `<button type="button" class="link" data-asn="${a}" data-ttl="${ttl}" title="AS card">AS${a}</button>` : ''}</td>
       <td class="num ${rttClass(minRTT(r))}">${fmt(minRTT(r))}</td><td>${badge(g)}</td><td class="host">${esc(target)}</td></tr>`;
   }).join('');
   return `<div class="pop"><h4>${esc(n.label || 'unknown')}</h4><table>${rows}</table></div>`;
@@ -269,9 +472,12 @@ function popupHTML(n) {
 
 function segHTML(sg) {
   const d = sg.dRtt;
+  const tr = sg.tid === 'live' ? state.live : state.traces.get(sg.tid);
+  const h = hintsOf(tr).find((x) => x.from_ttl === sg.fromTTL && x.to_ttl === sg.toTTL);
+  const hint = h ? `<div class="hint">≈ cable? ${esc(h.cables.map((c) => c.name).join(', '))} <span class="host">(heuristic)</span></div>` : '';
   return `<div class="pop seg"><b style="color:${sg.color}">hop ${sg.fromTTL} → ${sg.toTTL}</b>
     <div>${esc(sg.from.label || '?')} → ${esc(sg.to.label || '?')}</div>
-    <div class="host">segment ${sg.order + 1} · Δrtt <span style="color:${deltaColor(Math.max(0, d))}">${d < 0 ? '−' : '+'}${Math.abs(d) < 0.005 ? '0' : fmt(Math.abs(d))} ms</span>${sg.dashed ? ' · loss/ECMP' : ''}</div></div>`;
+    <div class="host">segment ${sg.order + 1} · Δrtt <span style="color:${deltaColor(Math.max(0, d))}">${d < 0 ? '−' : '+'}${Math.abs(d) < 0.005 ? '0' : fmt(Math.abs(d))} ms</span>${sg.dashed ? ' · loss/ECMP' : ''}</div>${hint}</div>`;
 }
 
 // ---------- segment highlight (map ↔ table) ----------
@@ -421,6 +627,21 @@ function renderDetails() {
       ${(s.steps || []).length ? `<table class="hops"><tr><th>ttl</th><th>outcome</th><th>router</th><th>rtt</th></tr>${s.steps.map((st) =>
         `<tr><td class="num">${st.ttl}</td><td>${esc(st.outcome)}</td><td class="mono">${esc(st.router || '—')}</td><td class="num">${fmt(st.rtt_ms)}</td></tr>`).join('')}</table>` : ''}</div>`);
   }
+  const hints = hintsOf(tr);
+  if (hints.length) {
+    cards.push(`<div class="card wide"><h3>Submarine cables · heuristic</h3>${hints.map((x) => `<div class="hintrow"><b>hop ${x.from_ttl}→${x.to_ttl}</b> ${esc(x.from)} → ${esc(x.to)} <span class="host">${Math.round(x.km)} km</span><div>${x.cables.map((c) =>
+      `${esc(c.name)} <span class="host">(${esc(c.from)} ${Math.round(c.from_km)} km · ${esc(c.to)} ${Math.round(c.to_km)} km${c.rfs ? ' · RFS ' + esc(c.rfs) : ''})</span>`).join('<br>')}</div></div>`).join('')}
+      <p class="host">Cables landing near both ends of a long segment. Nothing proves the traffic uses them; turn on “Submarine cables” to see them highlighted.</p></div>`);
+  }
+  const asns = pathASNs(tr);
+  if (asns.some((a) => briefOf(a))) {
+    cards.push(`<div class="card wide"><h3>AS on the path</h3><table class="aslist">${asns.map((a) => {
+      const b = briefOf(a);
+      if (!b) return `<tr><td><button type="button" class="link" data-asn="${a}">AS${a}</button></td><td colspan="3" class="host">—</td></tr>`;
+      return `<tr><td><button type="button" class="link" data-asn="${a}">AS${a}</button></td><td>${esc((b.name || '').slice(0, 28))}</td><td>${repBadge(b)}</td>
+        <td class="host">${[b.rank ? '#' + b.rank : '', b.type, b.traffic, b.users ? human(b.users) + ' users' : ''].filter(Boolean).map(esc).join(' · ')}</td></tr>`;
+    }).join('')}</table></div>`);
+  }
   const rows = [];
   for (const h of tr.hops || []) {
     const rs = h.responders || [];
@@ -438,7 +659,7 @@ function renderDetails() {
       rows.push(`<tr class="${i ? 'branch' : ''}" data-ttl="${h.ttl}" data-lat="${g.located ? g.lat : ''}" data-lon="${g.located ? g.lon : ''}">
         <td class="num">${i ? '└' : h.ttl}</td>
         <td class="mono">${esc(r.ip)}${r.final ? ' ◎' : ''}<div class="host">${esc(r.host || '')}</div></td>
-        <td>${r.net?.asn ? `AS${r.net.asn}` : ''}<div class="host">${esc((r.net?.name || '').split(/ - |,/)[0])}</div></td>
+        <td>${r.net?.asn ? `<button type="button" class="link" data-asn="${r.net.asn}" data-ttl="${h.ttl}">AS${r.net.asn}</button> ${repDot(briefOf(r.net.asn))}` : ''}<div class="host">${esc((r.net?.name || '').split(/ - |,/)[0])}</div></td>
         <td>${esc(loc)}${g.backbone ? `<div class="host">${esc(g.backbone.name)}</div>` : ''}</td>
         <td>${badge(g)}</td>
         <td class="num">${(r.rtts || []).map((x) => `<span class="${rttClass(x)}">${fmt(x)}</span>`).join(' ')}</td>
@@ -456,6 +677,8 @@ function renderDetails() {
     row.addEventListener('mouseenter', () => highlight(segsInto(tid, ttl)));
     row.addEventListener('mouseleave', () => highlight(null));
     row.addEventListener('click', () => {
+      const a = (tr.hops || []).find((x) => x.ttl === ttl)?.responders?.[0]?.net?.asn;
+      if (a) showASNCard(a, { ttl });
       if (!map) return;
       box.querySelectorAll('tr.hl').forEach((x) => x.classList.remove('hl'));
       row.classList.add('hl');
@@ -466,6 +689,10 @@ function renderDetails() {
     });
   });
   applyHL(hlIds);
+}
+
+function repDot(b) {
+  return b?.rep ? `<span class="repdot ${REP_CLASS[b.rep] || ''}" title="${esc(b.rep + ' ' + (b.rep_score || 0) + '/100')}"></span>` : '';
 }
 
 function avg(h) {
@@ -531,6 +758,9 @@ function render() {
   raf = requestAnimationFrame(() => {
     if (!SHARE) renderHistory();
     renderMap();
+    renderPoPs();
+    renderHints();
+    if (layerOn('pops')) ensurePathASNs();
     renderDetails();
     if (!SHARE) renderDiff();
   });
@@ -563,6 +793,7 @@ function startRun(form) {
   on('note', (e) => setStatus(e.note, 'live'));
   on('hop', (e) => { state.live.hops.push(e.hop); setStatus(`hop ${e.hop.ttl}…`, 'live'); render(); });
   on('whois', (e) => { state.live.extra.whois = e.data; render(); });
+  on('asns', (e) => { state.live.extra.asns = e.data; render(); });
   on('sni-step', (e) => setStatus(`SNI ttl ${e.step.ttl}: ${e.step.outcome}`, 'live'));
   on('done', async (e) => {
     es.close();
@@ -600,6 +831,7 @@ async function bootShare() {
   note.innerHTML = 'shared trace · run your own: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code> · <a href="/">traced.netkitty.dev</a>';
   $('.bar .brand').after(note);
   api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')}`; }).catch(() => {});
+  initLayerControl();
   initMap();
   try {
     const tr = await api('/api/traces/' + encodeURIComponent(SHARE_ID));
@@ -623,6 +855,7 @@ $('#run').addEventListener('submit', (e) => { e.preventDefault(); startRun(e.cur
 $('#refresh').addEventListener('click', loadHistory);
 api('/api/info').then((i) => { $('#ver').textContent = `v${String(i.version).replace(/^v/, '')} · ${i.ixp_prefixes} IXP prefixes · ${i.cities} cities`; }).catch(() => {});
 
+initLayerControl();
 initMap();
 (async () => {
   const m = location.hash.match(/t=([^&]+)/);

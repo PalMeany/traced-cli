@@ -1,6 +1,7 @@
 package share
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/feeds"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/web"
 )
@@ -116,6 +118,8 @@ func NewServer(o ServerOptions) (*Server, error) {
 	mux.HandleFunc("POST /api/traces", s.handleUpload)
 	mux.HandleFunc("GET /api/traces/{id}", s.handleGet)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.Handle("GET /api/cables", web.CableLayer("cables", 86400))
+	mux.Handle("GET /api/landing", web.CableLayer("landing", 86400))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	s.mux = mux
 	return s, nil
@@ -135,9 +139,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Run sweeps expired traces every hour until stop is closed.
+// It also keeps the submarine cable map (served on /api/cables) fresh.
 func (s *Server) Run(stop <-chan struct{}) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
+	go s.refreshCables()
 	for {
 		select {
 		case <-stop:
@@ -145,8 +151,38 @@ func (s *Server) Run(stop <-chan struct{}) {
 		case <-t.C:
 			s.Sweep()
 			s.lim.gc()
+			go s.refreshCables()
 		}
 	}
+}
+
+var refreshing sync.Mutex
+
+func (s *Server) refreshCables() {
+	if !refreshing.TryLock() {
+		return
+	}
+	defer refreshing.Unlock()
+	if st := feedStatus("cables"); st != nil && st.Fresh {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	r := feeds.Update(ctx, feeds.ByName("cables"))
+	if r.Err != nil {
+		log.Printf("cables: refresh failed: %v", r.Err)
+	} else if r.Updated {
+		log.Printf("cables: %d cables refreshed in %s", r.Entries, r.Took.Round(time.Second))
+	}
+}
+
+func feedStatus(name string) *feeds.Status {
+	for _, st := range feeds.Stat() {
+		if st.Name == name {
+			return &st
+		}
+	}
+	return nil
 }
 
 // Sweep deletes expired traces and recounts the storage in use.

@@ -15,12 +15,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/PalMeany/traced-cli/internal/app"
+	"github.com/PalMeany/traced-cli/internal/cache"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/mtr"
 	"github.com/PalMeany/traced-cli/internal/share"
@@ -37,12 +39,15 @@ usage:
   traced <target> [flags]          trace (ICMP by default)
   traced mtr <target> [flags]      live MTR view (q quit, p pause, r reset, n names, m map)
   traced sni <host> [--sni name]   TLS ClientHello probe: where does a filter cut the SNI
-  traced whois <domain|ip>         RDAP/WHOIS + DNS + ASN + geofeed
+  traced whois <domain|ip>         RDAP/WHOIS + DNS + ASN + geofeed + reputation
+  traced asn <ASN|ip|domain>       provider profile: PeeringDB, CAIDA rank/cone, BGP prefixes, eyeballs
+  traced rep <ip|ASN|domain>       reputation: Kinetio, Spamhaus DROP/ZEN, FireHOL, ET, Tor, AbuseIPDB
+  traced feeds [update [name…]]    open data cache: cables, PeeringDB, APNIC, reputation lists
   traced history [--limit N]       stored traces
   traced diff <id1> <id2>          compare two traces (ids, unique prefixes or 1 = newest)
   traced map [id...]               open the local web map (with traces preselected)
   traced serve [--listen addr]     run the web UI without opening a browser
-  traced update-ixp                refresh the IXP prefix table from PeeringDB
+  traced update-ixp                refresh the IXP prefix table from PeeringDB (also done by feeds update)
   traced share-server [flags]      public trace store + read-only map (what runs on traced.netkitty.dev)
   traced version
 
@@ -62,12 +67,20 @@ trace flags:
   --geofeed FILE|DIR  extra RFC 8805 CSV (also ~/.config/traced/geofeeds/*.csv)
   --origin LAT,LON|CODE  your location (improves RTT physics checks)
   -n                  numeric (no PTR names)   --no-whois  --no-save
+  --no-asn            skip AS profiles of the path (rank, traffic, PoPs, reputation)
   --no-share          do not publish the trace (by default it is uploaded and a map
                       link https://traced.netkitty.dev/t/<id> is printed; kept 30 days)
   --share-url URL     your own share server (traced share-server)
 
-env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, TRACED_NO_SHARE=1, TRACED_SHARE_URL, NO_COLOR
-data: history in ~/.local/share/traced, cache in ~/.cache/traced
+asn / rep / whois flags:
+  --prefixes          asn: list every announced prefix
+  --no-rep            asn/whois: skip the reputation check     --no-dnsbl  skip zen.spamhaus.org
+  --force             feeds update: ignore the TTL
+
+env: TRACED_IPINFO_TOKEN, TRACED_MMDB, TRACED_IFACE, TRACED_ORIGIN, TRACED_NO_SHARE=1, TRACED_SHARE_URL, NO_COLOR,
+     ABUSEIPDB_API_KEY (optional AbuseIPDB check), PEERINGDB_API_KEY (higher PeeringDB limits),
+     TRACED_DNSBL_RESOLVER=ip[:port] (own resolver for Spamhaus ZEN), TRACED_DNSBL=0, TRACED_FEEDS_AUTO=0
+data: history in ~/.local/share/traced, cache and feeds in ~/.cache/traced
 `
 
 func main() {
@@ -108,6 +121,12 @@ func run(args []string) error {
 		return cmdServe(args[1:], true)
 	case "serve":
 		return cmdServe(args[1:], false)
+	case "feeds":
+		return cmdFeeds(args[1:])
+	case "asn", "as":
+		return cmdASN(args[1:])
+	case "rep", "reputation":
+		return cmdRep(args[1:])
 	case "update-ixp":
 		ctx, cancel := signalCtx()
 		defer cancel()
@@ -142,7 +161,7 @@ func cmdTrace(args []string) error {
 	cfg := app.Config{
 		Trace: o.traceOptions(target), Geo: !o.noGeo, GeoOpts: gopt,
 		Whois: !o.noWhois && !o.noGeo && app.IsDomain(target),
-		SNI:   o.sni, ControlSNI: o.controlSNI, Save: !o.noSave,
+		SNI:   o.sni, ControlSNI: o.controlSNI, Save: !o.noSave, ASN: !o.noASN,
 	}
 	ctx, cancel := signalCtx()
 	defer cancel()
@@ -190,6 +209,7 @@ func cmdTrace(args []string) error {
 	}
 	ex := app.ExtraOf(r)
 	ui.Anomalies(w, r)
+	ui.PathIntel(w, r)
 	ui.Summary(w, r)
 	if ex != nil {
 		ui.SNI(w, ex.SNI)
@@ -223,13 +243,16 @@ func cmdWhois(args []string) error {
 	}
 	ctx, cancel := signalCtx()
 	defer cancel()
-	rep := whois.Lookup(ctx, pos[0])
+	wr := whois.Lookup(ctx, pos[0])
+	plus := enrichWhois(ctx, wr, !o.noRep, !o.noASN, !o.noDNSBL)
 	if o.jsonOut {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rep)
+		return printJSON(plus)
 	}
-	ui.Whois(os.Stdout, rep)
+	ui.Whois(os.Stdout, wr)
+	for _, a := range plus.ASNs {
+		ui.ASNShort(os.Stdout, a)
+	}
+	ui.RepLines(os.Stdout, plus.Reputation)
 	return nil
 }
 
@@ -350,7 +373,7 @@ func webDefaults(o *opts) (web.Options, error) {
 	}
 	return web.Options{Listen: o.listen, Defaults: app.Config{
 		Trace: trace.Options{Probes: o.probes, MaxTTL: o.maxTTL, Timeout: o.timeout, Interface: o.iface},
-		Geo:   !o.noGeo, GeoOpts: gopt, Save: true, ControlSNI: o.controlSNI,
+		Geo:   !o.noGeo, GeoOpts: gopt, Save: true, ControlSNI: o.controlSNI, ASN: !o.noASN,
 	}}, nil
 }
 
@@ -487,6 +510,9 @@ func cmdShareServer(args []string) error {
 	trust := fs.Bool("trust-proxy", true, "take the peer address from X-Real-IP on loopback connections (local nginx)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if os.Getenv("TRACED_CACHE_DIR") == "" {
+		cache.SetDir(filepath.Join(*dir, "cache")) // feeds (cable map) next to the store
 	}
 	srv, err := share.NewServer(share.ServerOptions{Dir: *dir, PublicURL: *public, TTL: *ttl, Rate: *rate, Burst: *burst,
 		MaxBytes: *maxMB << 20, TrustProxy: *trust})

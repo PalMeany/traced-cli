@@ -40,7 +40,7 @@ chmod +x "$tmp/traced"
 
 # traceroute шлёт сырые пакеты: на linux без root/CAP_NET_RAW не заработает
 if [ "$os" = linux ] && [ "$(id -u)" != 0 ] && command -v sudo >/dev/null 2>&1; then
-  case "$1" in whois|version|history|diff|"") "$tmp/traced" "$@" ;; *) sudo "$tmp/traced" "$@" ;; esac
+  case "$1" in whois|asn|as|rep|reputation|feeds|version|history|diff|"") "$tmp/traced" "$@" ;; *) sudo "$tmp/traced" "$@" ;; esac
 else
   "$tmp/traced" "$@"
 fi

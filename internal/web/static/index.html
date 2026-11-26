@@ -44,12 +44,16 @@
         <span class="badge rdns">rdns</span><span class="badge ixp">ixp</span><span class="badge geofeed">geofeed</span>
         <span class="badge ipmap">ipmap</span><span class="badge geoip">geoip</span><span class="badge registry">registry</span><span class="badge interp">interp</span>
       </div>
+      <div class="lg">AS rep <span class="repdot ok"></span>clean <span class="repdot low"></span>low <span class="repdot mid"></span>susp. <span class="repdot bad"></span>dirty</div>
+      <div class="lg"><span class="pt ix"></span>IX <span class="pt fac"></span>facility of an AS on the path</div>
       <label class="chk"><input type="checkbox" id="colorByTrace"> color lines by route</label>
     </section>
   </aside>
 
   <div class="mapwrap">
     <div id="map" aria-label="route map"></div>
+    <div id="layers" class="layers" role="group" aria-label="map layers"></div>
+    <aside id="hopcard" class="hopcard card" hidden aria-live="polite"></aside>
     <div id="mapfail" class="mapfail" hidden>Map library could not be loaded (offline?). Tables still work.</div>
   </div>
 
