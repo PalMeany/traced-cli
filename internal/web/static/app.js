@@ -6,6 +6,8 @@ const $ = (s, el = document) => el.querySelector(s);
 const SHARE = document.documentElement.dataset.mode === 'share';
 const SHARE_ID = SHARE ? (document.querySelector('meta[name="traced-share"]')?.content || location.pathname.split('/').pop()) : '';
 const SHARE_MAP = SHARE && SHARE_ID === 'map'; // public map without a trace (traced.netkitty.dev/t/map)
+const MAP_INTRO = `Terrestrial backbones of large providers (built-in dataset) and submarine cables — toggle them top left.
+  “Импорт карты…” parses a provider's network map picture (PNG/JPEG/WebP/SVG) and keeps the layer in this browser session only.`;
 const PALETTE = ['#5cc8ff', '#ff8a5c', '#b78cff', '#3ddc97', '#ffd35c', '#ff5da8', '#5cffe1', '#c0c8d4'];
 const STYLES = [
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -815,7 +817,7 @@ function renderDetails() {
   const box = $('#details');
   const tr = state.active === 'live' ? state.live : state.traces.get(state.active);
   if (!tr) {
-    box.innerHTML = `<div class="empty">${SHARE ? 'Loading trace…' : 'Select a trace from history or run a new one.'}</div>`;
+    box.innerHTML = `<div class="empty">${SHARE_MAP ? MAP_INTRO : SHARE ? 'Loading trace…' : 'Select a trace from history or run a new one.'}</div>`;
     return;
   }
   const ex = tr.extra || {};
@@ -1069,8 +1071,7 @@ async function bootShare() {
   initMap();
   if (SHARE_MAP) {
     note.innerHTML = 'backbone &amp; cable map · trace your own route: <code>curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1</code> · <a href="/">traced.netkitty.dev</a>';
-    $('#details').innerHTML = `<div class="empty">Terrestrial backbones of large providers (built-in dataset) and submarine cables — toggle them top left.
-      “Импорт карты…” parses a provider's network map picture (PNG/JPEG/WebP/SVG) and keeps the layer in this browser session only.</div>`;
+    $('#details').innerHTML = `<div class="empty">${MAP_INTRO}</div>`;
     setStatus('backbone & cable map');
     return;
   }
