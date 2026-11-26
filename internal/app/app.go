@@ -19,7 +19,7 @@ import (
 )
 
 // Version of traced.
-var Version = "1.2.1"
+var Version = "1.4.0"
 
 // Config describes one trace job.
 type Config struct {
@@ -29,6 +29,8 @@ type Config struct {
 	Whois      bool   // attach WHOIS/RDAP + DNS of the target
 	SNI        string // run an SNI probe with this server name after the trace
 	ControlSNI string
+	MTU        bool // run ICMP+TCP Path MTU probe (20->5->1 staircase)
+	NoNAT      bool // skip NAT/CGNAT detection
 	Save       bool
 	Tunnel     string // set when the caller already resolved Interface="auto"
 	ASN        bool   // profile every AS on the path (rank, traffic, PoPs, reputation)
@@ -36,14 +38,18 @@ type Config struct {
 
 // Extra is attached to Result.Extra.
 type Extra struct {
-	Whois     *whois.Report         `json:"whois,omitempty"`
-	SNI       *trace.SNIResult      `json:"sni,omitempty"`
-	ASNs      map[string]*asn.Brief `json:"asns,omitempty"`      // AS profiles keyed by number
-	Cables    []SegmentCables       `json:"cables,omitempty"`    // submarine cable hints (heuristic)
-	Backbones []backbone.Hint       `json:"backbones,omitempty"` // terrestrial backbones of ASes on the path
-	Interface string                `json:"interface,omitempty"`
-	Tunnel    string                `json:"tunnel,omitempty"`
-	Notes     []string              `json:"notes,omitempty"`
+	Whois     *whois.Report             `json:"whois,omitempty"`
+	SNI       *trace.SNIResult          `json:"sni,omitempty"`
+	MTU       *trace.MTUResult          `json:"mtu,omitempty"`
+	NAT       *trace.NATResult          `json:"nat,omitempty"`
+	ASNs      map[string]*asn.Brief     `json:"asns,omitempty"`       // AS profiles keyed by number
+	PrefixBGP map[string]*asn.PrefixBGP `json:"prefix_bgp,omitempty"` // BGP upstreams & history per hop prefix
+	IXPs      []RouteIXP                `json:"ixps,omitempty"`       // IXPs automatically detected on the path
+	Cables    []SegmentCables           `json:"cables,omitempty"`     // submarine cable hints (heuristic)
+	Backbones []backbone.Hint           `json:"backbones,omitempty"`  // terrestrial backbones of ASes on the path
+	Interface string                    `json:"interface,omitempty"`
+	Tunnel    string                    `json:"tunnel,omitempty"`
+	Notes     []string                  `json:"notes,omitempty"`
 }
 
 // ResolveInterface handles the "auto" interface mode. It returns the
@@ -209,14 +215,41 @@ func Run(ctx context.Context, cfg Config, emit func(trace.Event)) (*trace.Result
 			emit(trace.Event{Type: "sni", Data: sr})
 		}
 	}
+	if cfg.MTU && ctx.Err() == nil {
+		port := cfg.Trace.Port
+		if cfg.Trace.Protocol != trace.TCP || port == 0 {
+			port = 443
+		}
+		emit(trace.Event{Type: "note", Note: "MTU probe (ICMP DF + TCP MSS/PMTUD, 20→5→1)…"})
+		mr, merr := trace.ProbeMTU(ctx, trace.MTUOptions{
+			Target: r.TargetIP, Port: port, IPv6: r.IPv6, IPv4: !r.IPv6,
+			Interface: cfg.Trace.Interface, Hops: r.Hops,
+		})
+		if merr != nil {
+			ex.Notes = append(ex.Notes, "mtu: "+merr.Error())
+		} else {
+			ex.MTU = mr
+			emit(trace.Event{Type: "mtu", Data: mr})
+		}
+	}
+	if !cfg.NoNAT && ctx.Err() == nil {
+		ex.NAT = trace.DetectNAT(ctx, r.TargetIP, r.Hops, cfg.GeoOpts.Offline)
+		if ex.NAT != nil {
+			emit(trace.Event{Type: "nat", Data: ex.NAT})
+		}
+	}
 	wwg.Wait()
 	if enr != nil {
-		ex.ASNs = enr.finish(r.Hops)
+		ex.ASNs, ex.PrefixBGP = enr.finish(r.Hops)
 		if len(ex.ASNs) > 0 {
 			emit(trace.Event{Type: "asns", Data: ex.ASNs})
 		}
+		if len(ex.PrefixBGP) > 0 {
+			emit(trace.Event{Type: "prefix-bgp", Data: ex.PrefixBGP})
+		}
 	}
 	if cfg.Geo {
+		ex.IXPs = RouteIXPs(r.Hops)
 		ex.Cables = CableHints(feeds.CablesLocal(), r.Hops)
 		ex.Backbones = BackboneHints(backbone.All(true), r.Hops)
 	}

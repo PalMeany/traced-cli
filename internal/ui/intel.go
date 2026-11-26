@@ -137,11 +137,22 @@ func ASN(w io.Writer, r *asn.Report, listPrefixes bool) {
 		if len(rt.Upstreams) > 0 {
 			var u []string
 			for _, n := range rt.Upstreams {
-				u = append(u, fmt.Sprintf("AS%d", n.ASN))
+				if n.Name != "" {
+					u = append(u, fmt.Sprintf("AS%d (%s)", n.ASN, Trunc(n.Name, 18)))
+				} else {
+					u = append(u, fmt.Sprintf("AS%d", n.ASN))
+				}
 			}
-			kvw(w, "top upstreams", strings.Join(u, " "))
+			kvw(w, "top upstreams", strings.Join(u, ", "))
 		}
 		kvw(w, "first seen", shortDate(rt.FirstSeen))
+		if h := rt.History; h != nil && len(h.Points) > 0 {
+			var pts []string
+			for _, pt := range h.Points {
+				pts = append(pts, fmt.Sprintf("%s:%d", pt.Time[:min(7, len(pt.Time))], pt.Prefixes))
+			}
+			kvw(w, "bgp history", fmt.Sprintf("%s → %s (peak %d pfx)  %s", h.FirstSeen, h.LastSeen, h.Peak, C(gray, strings.Join(pts, " "))))
+		}
 		if listPrefixes {
 			printPrefixes(w, "IPv4", rt.V4)
 			printPrefixes(w, "IPv6", rt.V6)
@@ -405,6 +416,77 @@ func PathIntel(w io.Writer, r *trace.Result) {
 			fmt.Fprintf(w, "  %s %s %s %s\n", C(cyan, Pad(fmt.Sprintf("AS%d", n), 9)), Pad(Trunc(b.Name, 30), 30), Pad(v, 11), C(gray, strings.Join(parts, " · ")))
 		}
 	}
+	if len(ex.IXPs) > 0 {
+		fmt.Fprintln(w, C(bold, "\nInternet Exchanges (IX) on path"))
+		for _, x := range ex.IXPs {
+			loc := strings.Trim(strings.Join([]string{x.City, x.Country}, ", "), ", ")
+			via := x.Prefix
+			if via == "" && x.Via != "" {
+				via = x.Via
+			}
+			fmt.Fprintf(w, "  hop %-2d %s %s %s %s\n", x.TTL, C(magenta, Pad(x.Name, 24)), Pad(loc, 18), C(gray, x.IP), C(gray, via))
+		}
+	}
+	if len(ex.PrefixBGP) > 0 {
+		fmt.Fprintln(w, C(bold, "\nBGP prefix upstreams & history")+C(gray, " (where hop prefixes are announced)"))
+		var pfxs []string
+		for k := range ex.PrefixBGP {
+			pfxs = append(pfxs, k)
+		}
+		sort.Strings(pfxs)
+		for _, k := range pfxs {
+			pb := ex.PrefixBGP[k]
+			if pb == nil {
+				continue
+			}
+			var ups []string
+			for i, u := range pb.Upstreams {
+				if i == 4 {
+					break
+				}
+				lbl := fmt.Sprintf("AS%d", u.ASN)
+				if u.Name != "" {
+					lbl += " " + Trunc(u.Name, 16)
+				}
+				if u.Pct > 0 {
+					lbl += fmt.Sprintf(" (%.0f%%)", u.Pct)
+				}
+				ups = append(ups, lbl)
+			}
+			upStr := C(gray, "direct / none")
+			if len(ups) > 0 {
+				upStr = strings.Join(ups, ", ")
+			}
+			histNote := ""
+			if pb.Changes > 0 {
+				histNote = C(yellow, fmt.Sprintf(" · %d origin change(s)", pb.Changes))
+			} else if len(pb.History) > 0 {
+				histNote = C(gray, fmt.Sprintf(" · since %s", pb.History[0].Start))
+			}
+			fmt.Fprintf(w, "  %s %s → %s%s\n", C(cyan, Pad(pb.Prefix, 19)), C(gray, fmt.Sprintf("AS%-7d", pb.OriginASN)), upStr, histNote)
+		}
+	}
+	if ex.NAT != nil {
+		NAT(w, ex.NAT)
+	}
+	if ex.MTU != nil {
+		MTU(w, ex.MTU)
+	}
+	// Geolocation source discrepancies across hops
+	var discLines []string
+	for _, h := range r.Hops {
+		for _, rs := range h.Responders {
+			if g := app.InfoOf(&rs); g != nil && len(g.Discrepancies) > 0 {
+				discLines = append(discLines, fmt.Sprintf("  hop %-2d %s (%s: %s) vs %s", h.TTL, rs.IP, g.Source, g.Label(), strings.Join(first(g.Discrepancies, 2), "; ")))
+			}
+		}
+	}
+	if len(discLines) > 0 {
+		fmt.Fprintln(w, C(bold, "\nGeo source discrepancies")+C(gray, " (highest-priority source chosen)"))
+		for _, l := range first(discLines, 6) {
+			fmt.Fprintln(w, C(gray, l))
+		}
+	}
 	if len(ex.Cables) > 0 {
 		fmt.Fprintln(w, C(bold, "\nSubmarine cables")+C(gray, " (heuristic: cables landing near both ends of a long segment)"))
 		for _, s := range ex.Cables {
@@ -490,5 +572,140 @@ func RepLines(w io.Writer, rs []*rep.Report) {
 				fmt.Fprintf(w, "  %s %s %s\n", Pad("", 26), C(gray, Pad(s.Title, 20)), s.Summary)
 			}
 		}
+	}
+}
+
+// PrefixBGP prints BGP upstreams and routing history for one prefix.
+func PrefixBGP(w io.Writer, pb *asn.PrefixBGP) {
+	if pb == nil {
+		return
+	}
+	orig := fmt.Sprintf("AS%d", pb.OriginASN)
+	if pb.OriginName != "" {
+		orig += " " + pb.OriginName
+	}
+	fmt.Fprintf(w, "\n%s %s  %s %s\n", C(bold, "BGP Prefix"), C(cyan, pb.Prefix), orig, C(gray, fmt.Sprintf("(%d RIS peers, %s)", pb.RISPeers, pb.Source)))
+	if len(pb.Upstreams) > 0 {
+		fmt.Fprintf(w, "  %s\n", C(gray, "upstreams (via):"))
+		for _, u := range pb.Upstreams {
+			name := u.Name
+			if name == "" {
+				name = "—"
+			}
+			pct := ""
+			if u.Pct > 0 {
+				pct = fmt.Sprintf("  %.1f%% (%d peers)", u.Pct, u.Peers)
+			}
+			fmt.Fprintf(w, "    %s %s%s\n", C(cyan, Pad(fmt.Sprintf("AS%d", u.ASN), 9)), Pad(Trunc(name, 30), 30), C(gray, pct))
+		}
+	}
+	if len(pb.History) > 0 {
+		fmt.Fprintf(w, "  %s", C(gray, "history:"))
+		if pb.Changes > 0 {
+			fmt.Fprintf(w, " %s", C(yellow, fmt.Sprintf("%d origin change(s)", pb.Changes)))
+		}
+		fmt.Fprintln(w)
+		for _, ev := range pb.History {
+			st := C(gray, ev.Start+" .. "+ev.End)
+			if ev.Active {
+				st = C(green, ev.Start+" .. now")
+			}
+			name := ""
+			if ev.Name != "" {
+				name = " " + ev.Name
+			}
+			fmt.Fprintf(w, "    %s%s  %s\n", C(cyan, fmt.Sprintf("AS%d", ev.ASN)), name, st)
+		}
+	}
+}
+
+// MTU prints ICMP DF + TCP MSS/PMTUD path MTU probe results.
+func MTU(w io.Writer, m *trace.MTUResult) {
+	if m == nil {
+		return
+	}
+	mtuStr := C(yellow, "unknown")
+	if m.PathMTU > 0 {
+		col := green
+		if m.PathMTU < 1500 {
+			col = yellow
+		}
+		if m.PathMTU < 1300 {
+			col = red
+		}
+		mtuStr = C(bold+col, fmt.Sprintf("%d bytes", m.PathMTU))
+	}
+	fmt.Fprintf(w, "\n%s %s → %s (%s)\n", C(bold, "Path MTU"), mtuStr, m.TargetIP, C(gray, fmt.Sprintf("%.0f ms", m.Duration)))
+	printMTUProto := func(p *trace.MTUProbeResult) {
+		if p == nil {
+			return
+		}
+		label := strings.ToUpper(p.Proto)
+		if p.Error != "" && p.PathMTU == 0 {
+			kvw(w, label, C(red, p.Error))
+			return
+		}
+		parts := []string{fmt.Sprintf("MTU %d", p.PathMTU)}
+		if p.MSS > 0 {
+			parts = append(parts, fmt.Sprintf("MSS %d (MTU %d)", p.MSS, p.MSSMTU))
+		}
+		if p.ReportedMTU > 0 {
+			parts = append(parts, fmt.Sprintf("reported %d", p.ReportedMTU))
+		}
+		if p.DropHopTTL > 0 || p.DropHopIP != "" {
+			dh := p.DropHopIP
+			if p.DropHopTTL > 0 {
+				dh = fmt.Sprintf("hop %d %s", p.DropHopTTL, dh)
+			}
+			parts = append(parts, C(yellow, "drops at "+strings.TrimSpace(dh)))
+		}
+		if p.Note != "" {
+			parts = append(parts, C(gray, p.Note))
+		}
+		kvw(w, label, strings.Join(parts, " · "))
+		if len(p.Steps) > 0 {
+			var seq []string
+			for _, st := range p.Steps {
+				mark := C(green, "✓")
+				if !st.Passed {
+					mark = C(red, "✗")
+				}
+				seq = append(seq, fmt.Sprintf("%d%s", st.Size, mark))
+			}
+			kvw(w, label+" steps", strings.Join(seq, " "))
+		}
+	}
+	printMTUProto(m.ICMP)
+	printMTUProto(m.TCP)
+}
+
+// NAT prints NAT / double-triple NAT / CGNAT detection.
+func NAT(w io.Writer, n *trace.NATResult) {
+	if n == nil {
+		return
+	}
+	col := green
+	label := "no NAT (direct)"
+	switch {
+	case n.Layers == 1 && n.CGNAT:
+		col, label = yellow, "CGNAT (100.64.0.0/10)"
+	case n.Layers == 1:
+		col, label = cyan, "single NAT (1 layer)"
+	case n.Layers == 2:
+		col, label = yellow, "double NAT (2 layers)"
+	case n.Layers == 3:
+		col, label = red, "triple NAT (3 layers)"
+	case n.Layers > 3:
+		col, label = red, fmt.Sprintf("multi-NAT (%d layers)", n.Layers)
+	}
+	if n.CGNAT && n.Layers > 1 {
+		label += " + CGNAT"
+	}
+	fmt.Fprintf(w, "\n%s %s\n", C(bold, "NAT"), C(bold+col, label))
+	if n.LocalIP != "" || n.PublicIP != "" {
+		kvw(w, "addresses", fmt.Sprintf("local %s → public %s", orDash(n.LocalIP), orDash(n.PublicIP)))
+	}
+	if len(n.Evidence) > 0 {
+		kvw(w, "evidence", C(gray, strings.Join(first(n.Evidence, 5), "; ")))
 	}
 }

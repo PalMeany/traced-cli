@@ -105,6 +105,7 @@ func Start(o Options) (*Server, error) {
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/feeds", s.handleFeeds)
 	mux.HandleFunc("/api/asn", s.handleASN)
+	mux.HandleFunc("/api/bgp", s.handleBGP)
 	mux.HandleFunc("/api/rep", s.handleRep)
 	mux.Handle("/api/cables", CableLayer("cables", 0))
 	mux.Handle("/api/landing", CableLayer("landing", 0))
@@ -258,6 +259,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.Trace.IPv6 = q.Get("v6") == "1"
 	cfg.Trace.IPv4 = q.Get("v4") == "1"
+	cfg.MTU = q.Get("mtu") == "1"
 	if sni := strings.TrimSpace(q.Get("sni")); sni != "" && targetRe(sni) {
 		cfg.SNI = sni
 	}

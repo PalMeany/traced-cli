@@ -24,31 +24,87 @@ type SegmentCables struct {
 	Cables  []feeds.CableHint `json:"cables"`
 }
 
+// RouteIXP is an Internet Exchange automatically detected on a hop of the trace.
+type RouteIXP struct {
+	TTL     int     `json:"ttl"`
+	IP      string  `json:"ip"`
+	Name    string  `json:"name"`
+	City    string  `json:"city,omitempty"`
+	Country string  `json:"country,omitempty"`
+	Prefix  string  `json:"prefix,omitempty"`
+	Via     string  `json:"via,omitempty"` // "prefix" | "rdns"
+	Lat     float64 `json:"lat,omitempty"`
+	Lon     float64 `json:"lon,omitempty"`
+}
+
+// RouteIXPs extracts every Internet Exchange crossed by the trace.
+func RouteIXPs(hops []trace.Hop) []RouteIXP {
+	var out []RouteIXP
+	seen := map[string]bool{}
+	for i := range hops {
+		for j := range hops[i].Responders {
+			rs := &hops[i].Responders[j]
+			g := InfoOf(rs)
+			if g == nil || g.IXP == nil {
+				continue
+			}
+			key := strconv.Itoa(hops[i].TTL) + ":" + g.IXP.Name
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, RouteIXP{
+				TTL:     hops[i].TTL,
+				IP:      rs.IP,
+				Name:    g.IXP.Name,
+				City:    g.IXP.City,
+				Country: g.IXP.Country,
+				Prefix:  g.IXP.Prefix,
+				Via:     g.IXP.Via,
+				Lat:     g.Lat,
+				Lon:     g.Lon,
+			})
+		}
+	}
+	return out
+}
+
 // Limits of the per-trace enrichment.
 const (
-	maxEnrichASNs = 14
-	maxPoPs       = 40
-	enrichWait    = 12 * time.Second // after the trace ends
+	maxEnrichASNs     = 14
+	maxEnrichPrefixes = 10
+	maxPoPs           = 40
+	enrichWait        = 12 * time.Second // after the trace ends
 )
 
-// enricher profiles every AS met on the path while the trace runs.
+// enricher profiles every AS and hop prefix met on the path while the trace runs.
 type enricher struct {
-	ctx     context.Context
-	mu      sync.Mutex
-	started map[int]bool
-	reports map[int]*asn.Report
-	reps    map[int]*rep.Report
-	wg      sync.WaitGroup
-	sem     chan struct{}
-	emit    func(trace.Event)
+	ctx        context.Context
+	mu         sync.Mutex
+	started    map[int]bool
+	startedPfx map[string]bool
+	reports    map[int]*asn.Report
+	reps       map[int]*rep.Report
+	prefixes   map[string]*asn.PrefixBGP
+	wg         sync.WaitGroup
+	sem        chan struct{}
+	emit       func(trace.Event)
 }
 
 func newEnricher(ctx context.Context, emit func(trace.Event)) *enricher {
-	return &enricher{ctx: ctx, started: map[int]bool{}, reports: map[int]*asn.Report{}, reps: map[int]*rep.Report{},
-		sem: make(chan struct{}, 4), emit: emit}
+	return &enricher{
+		ctx:        ctx,
+		started:    map[int]bool{},
+		startedPfx: map[string]bool{},
+		reports:    map[int]*asn.Report{},
+		reps:       map[int]*rep.Report{},
+		prefixes:   map[string]*asn.PrefixBGP{},
+		sem:        make(chan struct{}, 6),
+		emit:       emit,
+	}
 }
 
-// add starts the lookups for the ASNs of a hop (once per AS).
+// add starts the lookups for the ASNs and prefixes of a hop (once per AS/prefix).
 func (e *enricher) add(h *trace.Hop) {
 	for i := range h.Responders {
 		a := ASOf(&h.Responders[i])
@@ -56,39 +112,63 @@ func (e *enricher) add(h *trace.Hop) {
 			continue
 		}
 		e.mu.Lock()
-		if e.started[a.ASN] || len(e.started) >= maxEnrichASNs {
-			e.mu.Unlock()
-			continue
+		startAS := !e.started[a.ASN] && len(e.started) < maxEnrichASNs
+		if startAS {
+			e.started[a.ASN] = true
 		}
-		e.started[a.ASN] = true
+		startPfx := a.Prefix != "" && !e.startedPfx[a.Prefix] && len(e.startedPfx) < maxEnrichPrefixes
+		if startPfx {
+			e.startedPfx[a.Prefix] = true
+		}
 		e.mu.Unlock()
-		e.wg.Add(1)
-		go func(n int) {
-			defer e.wg.Done()
-			select {
-			case e.sem <- struct{}{}:
-			case <-e.ctx.Done():
-				return
-			}
-			defer func() { <-e.sem }()
-			r := asn.Profile(e.ctx, n, asn.Options{Prefixes: true, Timeout: 10 * time.Second})
-			var rp *rep.Report
-			if r.Routing != nil && r.Routing.CountV4+r.Routing.CountV6 > 0 {
-				o := rep.Options{PrefixesV4: r.Routing.V4, PrefixesV6: r.Routing.V6}
-				rp = rep.CheckASN(e.ctx, n, o)
-			} else {
-				rp = rep.CheckASN(e.ctx, n, rep.Options{NoNetwork: true, PrefixesV4: []string{}})
-			}
-			e.mu.Lock()
-			e.reports[n] = r
-			e.reps[n] = rp
-			e.mu.Unlock()
-		}(a.ASN)
+
+		if startAS {
+			e.wg.Add(1)
+			go func(n int) {
+				defer e.wg.Done()
+				select {
+				case e.sem <- struct{}{}:
+				case <-e.ctx.Done():
+					return
+				}
+				defer func() { <-e.sem }()
+				r := asn.Profile(e.ctx, n, asn.Options{Prefixes: true, Neighbours: true, Visibility: true, History: true, Timeout: 10 * time.Second})
+				var rp *rep.Report
+				if r.Routing != nil && r.Routing.CountV4+r.Routing.CountV6 > 0 {
+					o := rep.Options{PrefixesV4: r.Routing.V4, PrefixesV6: r.Routing.V6}
+					rp = rep.CheckASN(e.ctx, n, o)
+				} else {
+					rp = rep.CheckASN(e.ctx, n, rep.Options{NoNetwork: true, PrefixesV4: []string{}})
+				}
+				e.mu.Lock()
+				e.reports[n] = r
+				e.reps[n] = rp
+				e.mu.Unlock()
+			}(a.ASN)
+		}
+		if startPfx {
+			e.wg.Add(1)
+			go func(pfx string) {
+				defer e.wg.Done()
+				select {
+				case e.sem <- struct{}{}:
+				case <-e.ctx.Done():
+					return
+				}
+				defer func() { <-e.sem }()
+				pb, err := asn.LookupPrefix(e.ctx, pfx, false)
+				if err == nil && pb != nil {
+					e.mu.Lock()
+					e.prefixes[pfx] = pb
+					e.mu.Unlock()
+				}
+			}(a.Prefix)
+		}
 	}
 }
 
 // finish waits (bounded) and condenses the profiles.
-func (e *enricher) finish(hops []trace.Hop) map[string]*asn.Brief {
+func (e *enricher) finish(hops []trace.Hop) (map[string]*asn.Brief, map[string]*asn.PrefixBGP) {
 	done := make(chan struct{})
 	go func() { e.wg.Wait(); close(done) }()
 	select {
@@ -106,23 +186,30 @@ func (e *enricher) finish(hops []trace.Hop) map[string]*asn.Brief {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.reports) == 0 {
-		return nil
-	}
-	out := map[string]*asn.Brief{}
-	for n, r := range e.reports {
-		b := asn.BriefOf(r, near, maxPoPs)
-		if rp := e.reps[n]; rp != nil {
-			b.Rep, b.RepScore = rp.Verdict, rp.Score
-			for _, s := range rp.Sources {
-				if (s.Status == rep.StListed || s.Status == rep.StInfo) && s.Summary != "" {
-					b.RepNotes = append(b.RepNotes, s.Title+": "+s.Summary)
+	var outAS map[string]*asn.Brief
+	if len(e.reports) > 0 {
+		outAS = map[string]*asn.Brief{}
+		for n, r := range e.reports {
+			b := asn.BriefOf(r, near, maxPoPs)
+			if rp := e.reps[n]; rp != nil {
+				b.Rep, b.RepScore = rp.Verdict, rp.Score
+				for _, s := range rp.Sources {
+					if (s.Status == rep.StListed || s.Status == rep.StInfo) && s.Summary != "" {
+						b.RepNotes = append(b.RepNotes, s.Title+": "+s.Summary)
+					}
 				}
 			}
+			outAS[strconv.Itoa(n)] = b
 		}
-		out[strconv.Itoa(n)] = b
 	}
-	return out
+	var outPfx map[string]*asn.PrefixBGP
+	if len(e.prefixes) > 0 {
+		outPfx = map[string]*asn.PrefixBGP{}
+		for k, v := range e.prefixes {
+			outPfx[k] = v
+		}
+	}
+	return outAS, outPfx
 }
 
 // CableHints suggests submarine cables for long segments between consecutive

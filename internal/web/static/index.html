@@ -20,6 +20,7 @@
     <input name="port" type="number" min="1" max="65535" placeholder="port" aria-label="port" class="port">
     <input name="sni" placeholder="SNI probe (optional)" spellcheck="false" aria-label="SNI" class="sni">
     <label class="chk"><input type="checkbox" name="v6" value="1"> IPv6</label>
+    <label class="chk" title="ICMP DF + TCP MSS/PMTUD (step 20→5→1)"><input type="checkbox" name="mtu" value="1"> MTU</label>
     <button type="submit" id="go">Trace</button>
   </form>
   <div id="status" class="status" role="status"></div>

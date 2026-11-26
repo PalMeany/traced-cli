@@ -41,6 +41,7 @@ type opts struct {
 	limit                  int
 	noShare                bool
 	noASN, noRep, noDNSBL  bool
+	mtu, noNAT             bool
 	prefixes, force        bool
 	shareURL               string
 }
@@ -82,6 +83,8 @@ func newOpts(name string) *opts {
 	f.DurationVar(&o.sendGap, "gap", 0, "pause between probe packets (default 12ms; raise it if an ISP polices ICMP)")
 	f.IntVar(&o.limit, "limit", 20, "history: number of entries")
 	f.BoolVar(&o.noASN, "no-asn", false, "skip AS profiles (PeeringDB/CAIDA/RIPEstat)")
+	f.BoolVar(&o.mtu, "mtu", false, "after the trace, run ICMP DF + TCP MSS/PMTUD path MTU probe (20→5→1)")
+	f.BoolVar(&o.noNAT, "no-nat", false, "skip NAT / CGNAT detection")
 	f.BoolVar(&o.noRep, "no-rep", false, "skip the reputation check")
 	f.BoolVar(&o.noDNSBL, "no-dnsbl", os.Getenv("TRACED_DNSBL") == "0", "skip the Spamhaus ZEN DNSBL query")
 	f.BoolVar(&o.prefixes, "prefixes", false, "asn: list all announced prefixes")

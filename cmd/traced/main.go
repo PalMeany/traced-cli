@@ -41,7 +41,10 @@ usage:
   traced mtr <target> [flags]      live MTR view (q quit, p pause, r reset, n names, m map)
   traced sni <host> [--sni name]   TLS ClientHello probe: where does a filter cut the SNI
   traced whois <domain|ip>         RDAP/WHOIS + DNS + ASN + geofeed + reputation
-  traced asn <ASN|ip|domain>       provider profile: PeeringDB, CAIDA rank/cone, BGP prefixes, eyeballs
+  traced asn <ASN|ip|domain>       provider profile: PeeringDB, CAIDA rank/cone, BGP prefixes, history, eyeballs
+  traced bgp <prefix|ip|ASN>       BGP prefix announcements, direct upstreams (RIS/BGPView) and routing history
+  traced mtu <target> [-p PORT]    Path MTU probe: ICMP DF + TCP MSS/PMTUD staircase (step 20→5→1)
+  traced nat [target]              NAT / double-triple NAT / CGNAT detection
   traced rep <ip|ASN|domain>       reputation: Kinetio, Spamhaus DROP/ZEN, FireHOL, ET, Tor, AbuseIPDB
   traced backbone parse|list|import|remove   terrestrial provider backbones from map pictures (traced backbone help)
   traced feeds [update [name…]]    open data cache: cables, PeeringDB, APNIC, reputation lists
@@ -62,6 +65,8 @@ trace flags:
   --paris             constant flow id (single path through load balancers)
   --iface IF|auto|none bind to an interface; auto bypasses VPN/TUN routes (default auto)
   --sni NAME          after the trace run an SNI probe against the target IP
+  --mtu               after the trace run ICMP DF + TCP MSS/PMTUD path MTU probe (20→5→1)
+  --no-nat            skip NAT / CGNAT detection
   --web               open the result on the web map
   --json              JSON output
   --no-geo            no geolocation/ASN       --offline  local geo sources only
@@ -129,6 +134,12 @@ func run(args []string) error {
 		return cmdFeeds(args[1:])
 	case "asn", "as":
 		return cmdASN(args[1:])
+	case "bgp":
+		return cmdBGP(args[1:])
+	case "mtu":
+		return cmdMTU(args[1:])
+	case "nat":
+		return cmdNAT(args[1:])
 	case "rep", "reputation":
 		return cmdRep(args[1:])
 	case "update-ixp":
@@ -167,7 +178,7 @@ func cmdTrace(args []string) error {
 	cfg := app.Config{
 		Trace: o.traceOptions(target), Geo: !o.noGeo, GeoOpts: gopt,
 		Whois: !o.noWhois && !o.noGeo && app.IsDomain(target),
-		SNI:   o.sni, ControlSNI: o.controlSNI, Save: !o.noSave, ASN: !o.noASN,
+		SNI:   o.sni, ControlSNI: o.controlSNI, MTU: o.mtu, NoNAT: o.noNAT, Save: !o.noSave, ASN: !o.noASN,
 	}
 	ctx, cancel := signalCtx()
 	defer cancel()

@@ -27,7 +27,8 @@ type IXP struct {
 	Name    string `json:"name"`
 	City    string `json:"city"`
 	Country string `json:"country"`
-	Prefix  string `json:"prefix"`
+	Prefix  string `json:"prefix,omitempty"`
+	Via     string `json:"via,omitempty"` // "prefix" | "rdns"
 }
 
 type ixpNet struct {
@@ -72,7 +73,64 @@ func LookupIXP(ip net.IP) *IXP {
 	ixpOnce.Do(loadIXP)
 	for _, x := range ixpNets {
 		if x.n.Contains(ip) {
-			return &IXP{Name: x.e.Name, City: x.e.City, Country: x.e.Country, Prefix: x.e.Prefix}
+			return &IXP{Name: x.e.Name, City: x.e.City, Country: x.e.Country, Prefix: x.e.Prefix, Via: "prefix"}
+		}
+	}
+	return nil
+}
+
+type ixpHostRule struct {
+	substr  string
+	name    string
+	city    string
+	country string
+}
+
+var ixpHostRules = []ixpHostRule{
+	{"de-cix.net", "DE-CIX", "Frankfurt", "DE"},
+	{"decix", "DE-CIX", "Frankfurt", "DE"},
+	{"ams-ix.net", "AMS-IX", "Amsterdam", "NL"},
+	{"amsix", "AMS-IX", "Amsterdam", "NL"},
+	{"msk-ix.ru", "MSK-IX", "Moscow", "RU"},
+	{"mskx", "MSK-IX", "Moscow", "RU"},
+	{"spb-ix", "SPB-IX", "Saint Petersburg", "RU"},
+	{"piter-ix", "PITER-IX", "Saint Petersburg", "RU"},
+	{"dataline-ix", "DataLine-IX", "Moscow", "RU"},
+	{"w-ix", "W-IX", "Moscow", "RU"},
+	{"linx.net", "LINX", "London", "GB"},
+	{"lonap.net", "LONAP", "London", "GB"},
+	{"franceix.net", "France-IX", "Paris", "FR"},
+	{"nl-ix.net", "NL-IX", "Amsterdam", "NL"},
+	{"netnod.se", "Netnod", "Stockholm", "SE"},
+	{"sthix.net", "STHIX", "Stockholm", "SE"},
+	{"swissix.ch", "SwissIX", "Zurich", "CH"},
+	{"vix.at", "VIX", "Vienna", "AT"},
+	{"bix.hu", "BIX", "Budapest", "HU"},
+	{"plix.pl", "PLIX", "Warsaw", "PL"},
+	{"thinx.pl", "Thinx IX", "Warsaw", "PL"},
+	{"equinix.com", "Equinix IX", "", ""},
+	{"ix.br", "IX.br", "Sao Paulo", "BR"},
+	{"hkix.net", "HKIX", "Hong Kong", "HK"},
+	{"jpix.ad.jp", "JPIX", "Tokyo", "JP"},
+	{"bbix.net", "BBIX", "Tokyo", "JP"},
+	{"any2ix", "CoreSite Any2", "Los Angeles", "US"},
+	{"torix.ca", "TorIX", "Toronto", "CA"},
+	{"mix-it.net", "MIX-IT", "Milan", "IT"},
+	{"espanix.net", "ESPANIX", "Madrid", "ES"},
+	{"ficix.fi", "FICIX", "Helsinki", "FI"},
+	{"nix.cz", "NIX.CZ", "Prague", "CZ"},
+}
+
+// LookupIXPByHostname detects an Internet Exchange from a router's PTR name
+// when its IP is not in the peering LAN prefix table.
+func LookupIXPByHostname(host string) *IXP {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return nil
+	}
+	for _, r := range ixpHostRules {
+		if strings.Contains(h, r.substr) {
+			return &IXP{Name: r.name, City: r.city, Country: r.country, Via: "rdns"}
 		}
 	}
 	return nil

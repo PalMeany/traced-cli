@@ -11,11 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PalMeany/traced-cli/internal/app"
 	"github.com/PalMeany/traced-cli/internal/asn"
 	"github.com/PalMeany/traced-cli/internal/cache"
 	"github.com/PalMeany/traced-cli/internal/feeds"
 	"github.com/PalMeany/traced-cli/internal/geo"
 	"github.com/PalMeany/traced-cli/internal/rep"
+	"github.com/PalMeany/traced-cli/internal/trace"
 	"github.com/PalMeany/traced-cli/internal/ui"
 	"github.com/PalMeany/traced-cli/internal/whois"
 )
@@ -130,6 +132,131 @@ func cmdASN(args []string) error {
 	if rp != nil {
 		ui.Rep(os.Stdout, rp)
 	}
+	return nil
+}
+
+// traced bgp <prefix|ip|ASN|domain> [--json]
+func cmdBGP(args []string) error {
+	o := newOpts("bgp")
+	pos, err := o.parse(args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New("usage: traced bgp <prefix|ip|AS13335|domain> [--json]")
+	}
+	ctx, cancel := signalCtx()
+	defer cancel()
+	q := pos[0]
+	// Direct CIDR prefix?
+	if _, err := netip.ParsePrefix(q); err == nil {
+		pb, err := asn.LookupPrefix(ctx, q, o.offline)
+		if err != nil {
+			return err
+		}
+		if o.jsonOut {
+			return printJSON(pb)
+		}
+		ui.PrefixBGP(os.Stdout, pb)
+		return nil
+	}
+	// Resolve ASN / IP / domain
+	t, err := asn.Resolve(ctx, q)
+	if err != nil {
+		return err
+	}
+	var pb *asn.PrefixBGP
+	if t.Prefix != "" {
+		pb, _ = asn.LookupPrefix(ctx, t.Prefix, o.offline)
+	}
+	r := asn.Profile(ctx, t.ASN, asn.Options{Neighbours: true, Visibility: true, History: true, Prefixes: true, NoNetwork: o.offline})
+	r.Query, r.IP, r.Prefix = q, t.IP, t.Prefix
+	if o.jsonOut {
+		return printJSON(struct {
+			Prefix *asn.PrefixBGP `json:"prefix,omitempty"`
+			ASN    *asn.Report    `json:"asn,omitempty"`
+		}{pb, r})
+	}
+	if pb != nil {
+		ui.PrefixBGP(os.Stdout, pb)
+	}
+	ui.ASN(os.Stdout, r, o.prefixes)
+	return nil
+}
+
+// traced mtu <target> [-p PORT] [-4|-6] [--iface IF] [--json]
+func cmdMTU(args []string) error {
+	o := newOpts("mtu")
+	pos, err := o.parse(args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New("usage: traced mtu <target> [-p PORT] [-4|-6] [--json]")
+	}
+	ctx, cancel := signalCtx()
+	defer cancel()
+	to := o.traceOptions(pos[0])
+	_, _, note := app.ResolveInterface(&to)
+	if note != "" && !o.jsonOut {
+		ui.Note(os.Stdout, note)
+	}
+	port := o.port
+	if port <= 0 {
+		port = 443
+	}
+	res, err := trace.ProbeMTU(ctx, trace.MTUOptions{
+		Target: pos[0], Port: port, IPv4: o.v4, IPv6: o.v6,
+		Timeout: o.timeout, Interface: to.Interface,
+	})
+	if err != nil {
+		return err
+	}
+	if o.jsonOut {
+		return printJSON(res)
+	}
+	ui.MTU(os.Stdout, res)
+	return nil
+}
+
+// traced nat [target] [--iface IF] [--json]
+func cmdNAT(args []string) error {
+	o := newOpts("nat")
+	pos, err := o.parse(args)
+	if err != nil {
+		return err
+	}
+	target := "1.1.1.1"
+	if len(pos) > 0 {
+		target = pos[0]
+	}
+	ctx, cancel := signalCtx()
+	defer cancel()
+	to := o.traceOptions(target)
+	if to.MaxTTL > 8 {
+		to.MaxTTL = 8
+	}
+	if to.Probes > 1 {
+		to.Probes = 1
+	}
+	_, _, note := app.ResolveInterface(&to)
+	if note != "" && !o.jsonOut {
+		ui.Note(os.Stdout, note)
+	}
+	r, _ := trace.Run(ctx, to, nil)
+	var hops []trace.Hop
+	tip := target
+	if r != nil {
+		hops = r.Hops
+		if r.TargetIP != "" {
+			tip = r.TargetIP
+		}
+	}
+	nat := trace.DetectNAT(ctx, tip, hops, o.offline)
+	if o.jsonOut {
+		return printJSON(nat)
+	}
+	ui.NAT(os.Stdout, nat)
 	return nil
 }
 

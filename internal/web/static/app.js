@@ -490,11 +490,15 @@ function asnCardHTML(asn, hop) {
     return head + `<div class="host">${msg}</div>`;
   }
   const users = b.users ? `${human(b.users)} (${(b.users_pct_cc || 0).toFixed(2)}% of ${esc(b.users_cc)}, ${(b.users_pct_world || 0).toFixed(3)}% world)` : '';
+  const ups = (b.upstreams || []).map((u) => `AS${u.asn}${u.name ? ' ' + u.name.slice(0, 18) : ''}`).join(', ');
+  const vis = b.vis_v4_total ? `${b.vis_v4_seeing || 0}/${b.vis_v4_total} RIS peers` : '';
+  const hist = b.history?.first_seen ? `${b.history.first_seen} → ${b.history.last_seen || 'now'} (peak ${b.history.peak || 0} pfx)` : '';
   return head + `<div class="asname">${esc(b.name || '')} ${repBadge(b)}</div>${kv([
     ['org', [b.org, b.country].filter(Boolean).join(' · ')],
     ['CAIDA rank', b.rank ? `#${b.rank}${b.clique ? ' · tier-1 clique' : ''}` : ''],
     ['cone', b.cone_asns ? `${human(b.cone_asns)} AS · ${human(b.cone_prefixes)} prefixes` : ''],
     ['degree', b.rank ? `${b.providers || 0} up · ${b.peers || 0} peers · ${b.customers || 0} cust` : ''],
+    ['BGP upstreams', ups], ['BGP visibility', vis], ['BGP history', hist],
     ['type', b.type], ['traffic', b.traffic], ['ratio', b.ratio], ['policy', b.policy],
     ['prefixes', b.prefixes_v4 || b.prefixes_v6 ? `${b.prefixes_v4 || 0} v4 · ${b.prefixes_v6 || 0} v6${b.addresses_v4 ? ' · ' + human(b.addresses_v4) + ' addr' : ''}` : ''],
     ['eyeballs', users], ['presence', b.ix_count || b.fac_count ? `${b.ix_count || 0} IX · ${b.fac_count || 0} facilities` : ''],
@@ -510,7 +514,7 @@ function showASNCard(asn, hop) {
   el.innerHTML = asnCardHTML(asn, hop);
   el.querySelector('.close')?.addEventListener('click', () => { el.hidden = true; cardFor = null; });
   const stale = (briefOf(asn)?.errors || []).length && !asnInfo.has(asn);
-  if ((!briefOf(asn) || stale) && !SHARE && !asnInfo.get(asn)?.error) {
+  if ((!briefOf(asn) || stale) && !asnInfo.get(asn)?.error) {
     fetchASN(asn).then(() => { if (cardFor?.asn === asn) showASNCard(asn, hop); renderPoPs(); });
   }
 }
@@ -782,9 +786,11 @@ function renderMap() {
     el.className = 'node' + (n.ixp ? ' ixp' : '') + (n.anom ? ' anom' : '');
     const traces = [...new Set(n.items.map((i) => i.color))];
     const ttls = ranges(n.items.map((i) => i.ttl));
-    el.title = `${n.label} · hop ${ttls}`;
+    const ixNames = [...new Set(n.items.map((i) => i.r.geo?.ixp?.name).filter(Boolean))];
+    el.title = `${n.label}${ixNames.length ? ' · IX: ' + ixNames.join(', ') : ''} · hop ${ttls}`;
     if (byOrder && !n.ixp && !n.anom) el.style.borderColor = gradColor(n.first);
-    el.innerHTML = `<span class="ttl">${esc(ttls.length > 14 ? ttls.slice(0, 13) + '…' : ttls)}</span>${traces.length > 1 ? `<span class="dots">${traces.map((c) => `<b style="background:${c}"></b>`).join('')}</span>` : ''}<span class="cap">${esc((n.label || '').split(',')[0])}</span>`;
+    const ixTag = ixNames.length ? `<span class="ixtag">IX ${esc(ixNames[0].slice(0, 18))}</span>` : '';
+    el.innerHTML = `<span class="ttl">${esc(ttls.length > 14 ? ttls.slice(0, 13) + '…' : ttls)}</span>${traces.length > 1 ? `<span class="dots">${traces.map((c) => `<b style="background:${c}"></b>`).join('')}</span>` : ''}${ixTag}<span class="cap">${esc((n.label || '').split(',')[0])}</span>`;
     const mk = new maplibregl.Marker({ element: el }).setLngLat([n.lon, n.lat])
       .setPopup(new maplibregl.Popup({ offset: 14, maxWidth: '460px' }).setHTML(popupHTML(n))).addTo(map);
     markers.push(mk);
@@ -802,8 +808,10 @@ function renderMap() {
 function badge(g) {
   if (!g) return '';
   if (g.private) return '<span class="badge interp">private</span>';
-  let s = g.source ? `<span class="badge ${esc(g.source)}" title="confidence ${Math.round((g.confidence || 0) * 100)}%">${esc(g.source)}</span>` : '';
+  const prio = g.priority ? `P${g.priority} · ` : '';
+  let s = g.source ? `<span class="badge ${esc(g.source)}" title="${prio}confidence ${Math.round((g.confidence || 0) * 100)}%">${esc(g.source)}</span>` : '';
   if (g.rtt_anomaly) s += ` <span class="badge anom" title="${esc(g.anomaly)}">rtt⚠</span>`;
+  if (g.discrepancies?.length) s += ` <span class="badge disc" title="${esc(g.discrepancies.join('\n'))}">±${g.discrepancies.length}</span>`;
   return s;
 }
 
@@ -854,6 +862,44 @@ function renderDetails() {
       ${(s.steps || []).length ? `<table class="hops"><tr><th>ttl</th><th>outcome</th><th>router</th><th>rtt</th></tr>${s.steps.map((st) =>
         `<tr><td class="num">${st.ttl}</td><td>${esc(st.outcome)}</td><td class="mono">${esc(st.router || '—')}</td><td class="num">${fmt(st.rtt_ms)}</td></tr>`).join('')}</table>` : ''}</div>`);
   }
+  if (ex.nat) {
+    const n = ex.nat;
+    const natCls = n.layers === 0 ? 'ok' : n.layers === 1 && !n.cgnat ? 'ok' : n.layers >= 3 ? 'bad' : 'warn';
+    const natLabel = n.layers === 0 ? 'No NAT (direct)' : `${n.type.toUpperCase()} NAT (${n.layers} layer${n.layers > 1 ? 's' : ''})${n.cgnat ? ' + CGNAT' : ''}`;
+    cards.push(`<div class="card"><h3>NAT detection</h3><p class="verdict ${natCls}">${esc(natLabel)}</p>${kv([
+      ['local IP', n.local_ip], ['public IP', n.public_ip],
+      ['CGNAT', n.cgnat ? 'yes (100.64.0.0/10)' : 'no'],
+      ['evidence', n.evidence]])}</div>`);
+  }
+  if (ex.mtu) {
+    const m = ex.mtu;
+    const fmtSteps = (p) => (p?.steps || []).map((st) => `${st.size}${st.passed ? '✓' : '✗'}`).join(' ');
+    const fmtProto = (p) => {
+      if (!p) return '';
+      if (p.error && !p.path_mtu) return p.error;
+      return [p.path_mtu ? `MTU ${p.path_mtu}` : '', p.mss ? `MSS ${p.mss} (MTU ${p.mss_mtu})` : '',
+        p.reported_mtu ? `reported ${p.reported_mtu}` : '',
+        p.drop_hop_ttl || p.drop_hop_ip ? `drops at ${p.drop_hop_ttl ? 'hop ' + p.drop_hop_ttl + ' ' : ''}${p.drop_hop_ip || ''}`.trim() : ''].filter(Boolean).join(' · ');
+    };
+    const mCls = !m.path_mtu ? 'warn' : m.path_mtu >= 1500 ? 'ok' : m.path_mtu < 1300 ? 'bad' : 'warn';
+    cards.push(`<div class="card"><h3>Path MTU (20→5→1)</h3><p class="verdict ${mCls}">${m.path_mtu ? m.path_mtu + ' bytes' : 'unknown'}</p>${kv([
+      ['ICMP DF', fmtProto(m.icmp)], ['ICMP steps', fmtSteps(m.icmp)],
+      ['TCP PMTUD', fmtProto(m.tcp)], ['TCP steps', fmtSteps(m.tcp)]])}</div>`);
+  }
+  if (ex.ixps?.length) {
+    cards.push(`<div class="card wide"><h3>Internet Exchanges (IX) on path</h3><table class="aslist">${ex.ixps.map((x) =>
+      `<tr><td class="num">hop ${x.ttl}</td><td><b>${esc(x.name)}</b></td><td>${esc([x.city, x.country].filter(Boolean).join(', '))}</td><td class="mono host">${esc(x.ip)} ${esc(x.prefix || x.via || '')}</td></tr>`).join('')}</table></div>`);
+  }
+  const pbMap = ex.prefix_bgp || {};
+  const pbKeys = Object.keys(pbMap).sort();
+  if (pbKeys.length) {
+    cards.push(`<div class="card wide"><h3>BGP prefix upstreams &amp; history</h3><table class="aslist">${pbKeys.map((k) => {
+      const pb = pbMap[k];
+      const ups = (pb.upstreams || []).slice(0, 4).map((u) => `AS${u.asn}${u.name ? ' ' + u.name.slice(0, 14) : ''}${u.pct ? ' (' + Math.round(u.pct) + '%)' : ''}`).join(', ') || 'direct / none';
+      const hist = pb.changes ? `${pb.changes} origin change(s)` : pb.history?.length ? `since ${pb.history[0].start}` : '';
+      return `<tr><td class="mono">${esc(pb.prefix)}</td><td><button type="button" class="link" data-asn="${pb.origin_asn}">AS${pb.origin_asn}</button></td><td>${esc(ups)}</td><td class="host">${esc(hist)}</td></tr>`;
+    }).join('')}</table></div>`);
+  }
   const hints = hintsOf(tr);
   if (hints.length) {
     cards.push(`<div class="card wide"><h3>Submarine cables · heuristic</h3>${hints.map((x) => `<div class="hintrow"><b>hop ${x.from_ttl}→${x.to_ttl}</b> ${esc(x.from)} → ${esc(x.to)} <span class="host">${Math.round(x.km)} km</span><div>${x.cables.map((c) =>
@@ -890,15 +936,17 @@ function renderDetails() {
       if (i === 0 && rs.length > 1) flags.push(`<span class="badge ecmp">ECMP×${rs.length}</span>`);
       if (r.mpls?.length) flags.push(`<span class="badge mpls" title="MPLS label stack">MPLS ${r.mpls.map((l) => l.label).join('/')}</span>`);
       const loss = h.sent ? Math.round(100 * (1 - h.received / h.sent)) : 0;
+      const pfxUp = (ex.prefix_bgp?.[r.net?.prefix]?.upstreams || []).slice(0, 2).map((u) => 'AS' + u.asn).join(',');
+      const physText = g.anomaly ? '⚠ ' + g.anomaly : (g.discrepancies?.length ? 'geo± ' + g.discrepancies[0] : '');
       rows.push(`<tr class="${i ? 'branch' : ''}" data-ttl="${h.ttl}" data-lat="${g.located ? g.lat : ''}" data-lon="${g.located ? g.lon : ''}">
         <td class="num">${i ? '└' : h.ttl}</td>
         <td class="mono">${esc(r.ip)}${r.final ? ' ◎' : ''}<div class="host">${esc(r.host || '')}</div></td>
-        <td>${r.net?.asn ? `<button type="button" class="link" data-asn="${r.net.asn}" data-ttl="${h.ttl}">AS${r.net.asn}</button> ${repDot(briefOf(r.net.asn))}` : ''}<div class="host">${esc((r.net?.name || '').split(/ - |,/)[0])}</div></td>
+        <td>${r.net?.asn ? `<button type="button" class="link" data-asn="${r.net.asn}" data-ttl="${h.ttl}">AS${r.net.asn}</button> ${repDot(briefOf(r.net.asn))}` : ''}<div class="host">${esc((r.net?.name || '').split(/ - |,/)[0])}${pfxUp ? ' · via ' + esc(pfxUp) : ''}</div></td>
         <td>${esc(loc)}${g.backbone ? `<div class="host">${esc(g.backbone.name)}</div>` : ''}</td>
         <td>${badge(g)}</td>
         <td class="num">${(r.rtts || []).map((x) => `<span class="${rttClass(x)}">${fmt(x)}</span>`).join(' ')}</td>
         <td>${flags.join(' ')}</td>
-        <td class="host" title="${esc(g.anomaly || '')}">${esc(g.anomaly ? '⚠ ' + g.anomaly : '')}</td>
+        <td class="host" title="${esc(g.anomaly || (g.discrepancies || []).join('\n'))}">${esc(physText)}</td>
         <td class="num">${i ? '' : loss + '%'}</td></tr>`);
     });
   }
@@ -1028,6 +1076,9 @@ function startRun(form) {
   on('hop', (e) => { state.live.hops.push(e.hop); setStatus(`hop ${e.hop.ttl}…`, 'live'); render(); });
   on('whois', (e) => { state.live.extra.whois = e.data; render(); });
   on('asns', (e) => { state.live.extra.asns = e.data; render(); });
+  on('prefix-bgp', (e) => { state.live.extra.prefix_bgp = e.data; render(); });
+  on('mtu', (e) => { state.live.extra.mtu = e.data; render(); });
+  on('nat', (e) => { state.live.extra.nat = e.data; render(); });
   on('sni-step', (e) => setStatus(`SNI ttl ${e.step.ttl}: ${e.step.outcome}`, 'live'));
   on('done', async (e) => {
     es.close();

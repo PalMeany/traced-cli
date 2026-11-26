@@ -26,8 +26,13 @@ curl -sL traced.netkitty.dev | sh -s -- 8.8.8.8
 curl -sL traced.netkitty.dev | sh -s -- sni example.com
 <i># whois/rdap + dns + asn + geofeed</i>
 wget -qO- traced.netkitty.dev | sh -s -- whois 1.1.1.1
-<i># провайдер: PeeringDB, ранг CAIDA, префиксы BGP, абоненты APNIC</i>
+<i># провайдер: PeeringDB, ранг CAIDA, префиксы и история BGP, абоненты APNIC</i>
 curl -sL traced.netkitty.dev | sh -s -- asn AS8359
+<i># BGP-анонсы префикса (апстримы и история анонсов)</i>
+curl -sL traced.netkitty.dev | sh -s -- bgp 1.1.1.0/24
+<i># Path MTU (ICMP DF + TCP MSS/PMTUD, лесенка 20→5→1) и детект NAT/CGNAT</i>
+curl -sL traced.netkitty.dev | sh -s -- mtu 1.1.1.1
+curl -sL traced.netkitty.dev | sh -s -- nat
 <i># чистота IP/AS/домена: Kinetio, Spamhaus, FireHOL, ET, Tor, AbuseIPDB</i>
 curl -sL traced.netkitty.dev | sh -s -- rep 185.220.101.1
 <i># живой mtr</i>
@@ -35,10 +40,13 @@ curl -sL traced.netkitty.dev | sh -s -- mtr 9.9.9.9
 <i># магистраль провайдера с картинки его карты сети → GeoJSON</i>
 curl -sL traced.netkitty.dev | sh -s -- backbone parse map.png --provider RETN --asn 9002 --region europe --out retn.geojson</pre>
 <p style="color:var(--mut);font-size:14px">В конце трасса печатает ссылку на карту — <code>карта: https://traced.netkitty.dev/t/…</code>: та же карта с хопами, ASN, городами и RTT, открывается в браузере и живёт 30 дней. Уходит только сама трасса; отключить — <code>--no-share</code> или <code>TRACED_NO_SHARE=1</code>.</p>
-<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.3.0</code>.</p>
+<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.4.0</code>.</p>
 <h2>Что умеет</h2>
 <div class="grid">
-<div class="card"><b>Честный geoip</b><p>rDNS и коды IATA, IXP из PeeringDB, geofeed RFC 8805, RIPE IPmap — и отбраковка по скорости света: anycast-«Бангкок» за 9 мс не пройдёт.</p></div>
+<div class="card"><b>Честный geoip и приоритеты</b><p>IXP из PeeringDB, geofeed RFC 8805, rDNS/IATA, RIPE IPmap, ipinfo и ip-api — явный приоритет источников, расхождения и отбраковка по скорости света.</p></div>
+<div class="card"><b>BGP-анонсы и история</b><p>traced bgp и карточка AS: через каких апстримов анонсится префикс (RIPEstat looking-glass / BGPView) и история анонсов (routing-history).</p></div>
+<div class="card"><b>Path MTU и NAT/CGNAT</b><p>traced mtu / --mtu: лесенка 20→5→1 по ICMP (DF) и TCP (MSS/PMTUD) с поиском хопа падения. Автодетект одиночного/двойного/тройного NAT и CGNAT.</p></div>
+<div class="card"><b>Автоопределение IX</b><p>Точки обмена (PeeringDB ixlan + rDNS) автоматически выделяются на карте и в сводке маршрута.</p></div>
 <div class="card"><b>ECMP и MPLS</b><p>Несколько проб на хоп показывают балансировку, метки MPLS видны из ICMP-расширений, есть режим --paris.</p></div>
 <div class="card"><b>SNI/DPI-пробы</b><p>TLS ClientHello с нужным SNI по TTL: на каком хопе фильтр рвёт соединение.</p></div>
 <div class="card"><b>WHOIS/RDAP</b><p>Домены и IP: RDAP, WHOIS43, DNS, ASN через Cymru и RIPEstat.</p></div>

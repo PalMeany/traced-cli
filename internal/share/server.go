@@ -126,6 +126,8 @@ func NewServer(o ServerOptions) (*Server, error) {
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.Handle("GET /api/cables", web.CableLayer("cables", 86400))
 	mux.Handle("GET /api/landing", web.CableLayer("landing", 86400))
+	mux.Handle("GET /api/asn", web.ASNHandler(func(r *http.Request) bool { return s.lim.allow(s.ClientIP(r)) }))
+	mux.Handle("GET /api/bgp", web.BGPHandler(func(r *http.Request) bool { return s.lim.allow(s.ClientIP(r)) }))
 	// terrestrial backbones: the built-in dataset only; pictures uploaded on
 	// the public map are parsed and handed back, never stored here
 	mux.Handle("GET /api/backbones", web.BackboneLayer(false, 3600))

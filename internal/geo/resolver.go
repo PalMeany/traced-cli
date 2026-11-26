@@ -18,21 +18,23 @@ import (
 
 // Info is the final location verdict for one responder.
 type Info struct {
-	City       string      `json:"city,omitempty"`
-	Region     string      `json:"region,omitempty"`
-	Country    string      `json:"country,omitempty"`
-	Lat        float64     `json:"lat,omitempty"`
-	Lon        float64     `json:"lon,omitempty"`
-	Located    bool        `json:"located"`
-	Source     string      `json:"source,omitempty"`
-	Confidence float64     `json:"confidence,omitempty"`
-	Private    bool        `json:"private,omitempty"`
-	IXP        *IXP        `json:"ixp,omitempty"`
-	Backbone   *Backbone   `json:"backbone,omitempty"`
-	RTTAnomaly bool        `json:"rtt_anomaly,omitempty"`
-	Anomaly    string      `json:"anomaly,omitempty"`
-	Geofeed    string      `json:"geofeed,omitempty"`
-	Candidates []Candidate `json:"candidates,omitempty"`
+	City          string      `json:"city,omitempty"`
+	Region        string      `json:"region,omitempty"`
+	Country       string      `json:"country,omitempty"`
+	Lat           float64     `json:"lat,omitempty"`
+	Lon           float64     `json:"lon,omitempty"`
+	Located       bool        `json:"located"`
+	Source        string      `json:"source,omitempty"`
+	Priority      int         `json:"priority,omitempty"`
+	Confidence    float64     `json:"confidence,omitempty"`
+	Private       bool        `json:"private,omitempty"`
+	IXP           *IXP        `json:"ixp,omitempty"`
+	Backbone      *Backbone   `json:"backbone,omitempty"`
+	RTTAnomaly    bool        `json:"rtt_anomaly,omitempty"`
+	Anomaly       string      `json:"anomaly,omitempty"`
+	Geofeed       string      `json:"geofeed,omitempty"`
+	Discrepancies []string    `json:"discrepancies,omitempty"`
+	Candidates    []Candidate `json:"candidates,omitempty"`
 }
 
 // Label is a short human readable location.
@@ -181,6 +183,15 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 					c.Lat, c.Lon, c.HasCoords, c.City = ct.Lat, ct.Lon, true, ct.Name
 				}
 				cands = append(cands, c)
+			} else if x := LookupIXPByHostname(d.host); x != nil {
+				d.ixp = x
+				if x.City != "" {
+					c := Candidate{Source: SrcIXP, City: x.City, Country: x.Country, Confidence: 0.85, Detail: x.Name + " (rDNS)"}
+					if ct := LookupCityIn(x.City, x.Country); ct != nil {
+						c.Lat, c.Lon, c.HasCoords, c.City = ct.Lat, ct.Lon, true, ct.Name
+					}
+					cands = append(cands, c)
+				}
 			}
 			for _, g := range r.local {
 				if e := g.Lookup(ip); e != nil {
@@ -195,12 +206,19 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 			}
 			if !r.o.Offline {
 				var iwg sync.WaitGroup
-				var imc *Candidate
+				var imc, iic *Candidate
 				if !r.o.NoIPMap {
 					iwg.Add(1)
 					go func() {
 						defer iwg.Done()
 						imc, _ = IPMap(ctx, s)
+					}()
+				}
+				if !r.o.NoGeoIP && r.o.IPInfoToken == "" {
+					iwg.Add(1)
+					go func() {
+						defer iwg.Done()
+						iic = IPInfoLite(ctx, s, "")
 					}()
 				}
 				d.as, _ = whois.LookupASN(ctx, ip)
@@ -221,6 +239,9 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 				iwg.Wait()
 				if imc != nil {
 					cands = append(cands, *imc)
+				}
+				if iic != nil {
+					cands = append(cands, *iic)
 				}
 			}
 			mu.Lock()
@@ -249,7 +270,21 @@ func (r *Resolver) Gather(ctx context.Context, ips []string) map[string]*IPData 
 			}
 		}
 		d.cands = Reconcile(d.cands, d.rir)
-		sort.SliceStable(d.cands, func(i, j int) bool { return d.cands[i].Confidence > d.cands[j].Confidence })
+		for i := range d.cands {
+			if d.cands[i].Priority == 0 {
+				d.cands[i].Priority = SourcePriority(d.cands[i].Source)
+			}
+		}
+		sort.SliceStable(d.cands, func(i, j int) bool {
+			diff := d.cands[i].Confidence - d.cands[j].Confidence
+			if diff > 0.05 || diff < -0.05 {
+				return diff > 0
+			}
+			if d.cands[i].Priority != d.cands[j].Priority {
+				return d.cands[i].Priority < d.cands[j].Priority
+			}
+			return diff > 0
+		})
 	}
 	return out
 }
@@ -407,10 +442,12 @@ func Validate(hops []trace.Hop, data map[string]*IPData, origin *Point) {
 			}
 			switch {
 			case chosen >= 0:
+				cands[chosen].Chosen = true
 				c := cands[chosen]
 				info.City, info.Region, info.Country = c.City, c.Region, c.Country
 				info.Lat, info.Lon, info.Located = c.Lat, c.Lon, true
 				info.Source, info.Confidence = c.Source, c.Confidence
+				info.Priority = SourcePriority(c.Source)
 				if c.Confidence >= 0.6 && rtt > 0 {
 					anchors = append(anchors, Point{Lat: c.Lat, Lon: c.Lon, RTT: rtt, Name: c.City})
 				}
@@ -419,14 +456,26 @@ func Validate(hops []trace.Hop, data map[string]*IPData, origin *Point) {
 				info.City, info.Country = last.City, last.Country
 				info.Lat, info.Lon, info.Located = last.Lat, last.Lon, true
 				info.Source, info.Confidence = SrcInterp, 0.25
+				info.Priority = SourcePriority(SrcInterp)
 			default:
 				// no coordinates: keep the country from any source
-				for _, c := range cands {
+				for ci := range cands {
+					c := &cands[ci]
 					if c.Country != "" {
+						c.Chosen = true
 						info.Country, info.City, info.Source, info.Confidence = c.Country, c.City, c.Source, c.Confidence*0.5
+						info.Priority = SourcePriority(c.Source)
 						break
 					}
 				}
+			}
+			for i := range cands {
+				if cands[i].Priority == 0 {
+					cands[i].Priority = SourcePriority(cands[i].Source)
+				}
+			}
+			if info.Located {
+				info.Discrepancies = computeDiscrepancies(info, cands)
 			}
 			info.Candidates = cands
 			rs.Geo = info
@@ -499,6 +548,50 @@ func fixDetours(hops []trace.Hop) {
 		x.info.Lat, x.info.Lon = p.Lat, p.Lon
 		x.info.Source, x.info.Confidence = SrcInterp, 0.3
 	}
+}
+
+func computeDiscrepancies(info *Info, cands []Candidate) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, c := range cands {
+		if c.Chosen {
+			continue
+		}
+		if c.City == "" && c.Country == "" {
+			continue
+		}
+		diffCountry := info.Country != "" && c.Country != "" && !strings.EqualFold(info.Country, c.Country)
+		dist := 0.0
+		if info.Located && c.HasCoords {
+			dist = DistanceKm(info.Lat, info.Lon, c.Lat, c.Lon)
+		}
+		if !diffCountry && dist < 150 {
+			continue
+		}
+		loc := strings.Trim(strings.Join([]string{c.City, c.Country}, ", "), ", ")
+		src := c.Source
+		if c.Source == SrcGeoIP && c.Detail != "" {
+			// strip extra notes after ';'
+			d := strings.Split(c.Detail, ";")[0]
+			src = fmt.Sprintf("%s(%s)", c.Source, strings.TrimSpace(d))
+		}
+		key := src + ":" + loc
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var msg string
+		if dist >= 150 {
+			msg = fmt.Sprintf("%s says %s (%.0f km off)", src, loc, dist)
+		} else {
+			msg = fmt.Sprintf("%s says %s", src, loc)
+		}
+		if c.Rejected != "" {
+			msg += " [rejected]"
+		}
+		out = append(out, msg)
+	}
+	return out
 }
 
 func minF(v []float64) float64 {

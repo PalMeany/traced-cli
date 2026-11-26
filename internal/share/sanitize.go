@@ -81,8 +81,14 @@ func Sanitize(r *trace.Result) (*trace.Result, error) {
 		out.Hops[i] = nh
 	}
 	out.Extra = nil
-	if ex := app.ExtraOf(r); ex != nil && (ex.Whois != nil || ex.SNI != nil || len(ex.ASNs) > 0 || len(ex.Cables) > 0) {
-		ne := &app.Extra{SNI: ex.SNI}
+	if ex := app.ExtraOf(r); ex != nil && (ex.Whois != nil || ex.SNI != nil || ex.MTU != nil || ex.NAT != nil || len(ex.ASNs) > 0 || len(ex.PrefixBGP) > 0 || len(ex.IXPs) > 0 || len(ex.Cables) > 0 || len(ex.Backbones) > 0) {
+		ne := &app.Extra{SNI: ex.SNI, MTU: ex.MTU, IXPs: ex.IXPs, Backbones: ex.Backbones}
+		if ex.NAT != nil {
+			cn := *ex.NAT
+			cn.LocalIP = ""
+			cn.PublicIP = ""
+			ne.NAT = &cn
+		}
 		if w := ex.Whois; w != nil {
 			cw := *w
 			cw.Errors = nil
@@ -105,6 +111,16 @@ func Sanitize(r *trace.Result) (*trace.Result, error) {
 				cb.RepNotes = cb.RepNotes[:8]
 			}
 			ne.ASNs[k] = &cb
+		}
+		for k, pb := range ex.PrefixBGP {
+			if pb == nil || len(ne.PrefixBGP) >= maxASNs {
+				continue
+			}
+			if ne.PrefixBGP == nil {
+				ne.PrefixBGP = map[string]*asn.PrefixBGP{}
+			}
+			cp := *pb
+			ne.PrefixBGP[k] = &cp
 		}
 		if len(ex.Cables) > maxCableSegs {
 			ne.Cables = ex.Cables[:maxCableSegs]

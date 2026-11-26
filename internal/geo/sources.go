@@ -34,6 +34,31 @@ const (
 	SrcRIR     = "registry"
 )
 
+// SourcePriority returns the explicit trust rank of a geolocation source
+// (1 = highest priority, 8 = lowest).
+func SourcePriority(src string) int {
+	switch src {
+	case SrcIXP:
+		return 1
+	case SrcGeofeed:
+		return 2
+	case SrcRDNS:
+		return 3
+	case SrcIPMap:
+		return 4
+	case SrcMMDB:
+		return 5
+	case SrcGeoIP:
+		return 6
+	case SrcRIR:
+		return 7
+	case SrcInterp:
+		return 8
+	default:
+		return 9
+	}
+}
+
 // Area is a physical constraint: the address is within RadiusKm of a point
 // (RIPE IPmap's latency engine: a RIPE Atlas probe saw it at a low RTT).
 type Area struct {
@@ -61,6 +86,8 @@ const GuessConfidence = 0.42
 // Candidate is a location claim from one source.
 type Candidate struct {
 	Source     string  `json:"source"`
+	Priority   int     `json:"priority,omitempty"` // explicit source priority (1 = highest)
+	Chosen     bool    `json:"chosen,omitempty"`   // selected as the primary verdict
 	City       string  `json:"city,omitempty"`
 	Region     string  `json:"region,omitempty"`
 	Country    string  `json:"country,omitempty"`
@@ -337,6 +364,45 @@ func (m *MMDB) Close() {
 	if m != nil {
 		m.r.Close()
 	}
+}
+
+// IPInfoLite queries ipinfo.io for an independent GeoIP candidate (works with
+// or without a token; cached 7 days; fails silently on rate limits).
+func IPInfoLite(ctx context.Context, ip, token string) *Candidate {
+	var c Candidate
+	if cache.Get("ipinfo", ip, &c) {
+		if c.Source == "" {
+			return nil
+		}
+		return &c
+	}
+	u := "https://ipinfo.io/" + ip + "/json"
+	if token != "" {
+		u += "?token=" + token
+	}
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var r struct {
+		City, Region, Country, Loc, Org string
+		Bogon                           bool
+	}
+	if err := getJSON(tctx, u, &r); err != nil {
+		return nil
+	}
+	if r.Bogon || (r.Country == "" && r.City == "") {
+		cache.Put("ipinfo", ip, Candidate{}, 24*time.Hour)
+		return nil
+	}
+	c = Candidate{Source: SrcGeoIP, Priority: SourcePriority(SrcGeoIP), City: r.City, Region: r.Region, Country: r.Country, Confidence: 0.44, Detail: "ipinfo.io"}
+	if p := strings.Split(r.Loc, ","); len(p) == 2 {
+		lat, e1 := strconv.ParseFloat(strings.TrimSpace(p[0]), 64)
+		lon, e2 := strconv.ParseFloat(strings.TrimSpace(p[1]), 64)
+		if e1 == nil && e2 == nil && (lat != 0 || lon != 0) {
+			c.Lat, c.Lon, c.HasCoords = lat, lon, true
+		}
+	}
+	cache.Put("ipinfo", ip, c, 7*24*time.Hour)
+	return &c
 }
 
 // ---------- PTR ----------

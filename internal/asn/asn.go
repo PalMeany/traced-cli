@@ -115,6 +115,7 @@ type Rank struct {
 // Neighbour is an adjacent AS seen in BGP.
 type Neighbour struct {
 	ASN   int    `json:"asn"`
+	Name  string `json:"name,omitempty"`
 	Type  string `json:"type"` // left (towards the core: upstream/peer) | right (downstream) | uncertain
 	Power int    `json:"power"`
 }
@@ -138,6 +139,7 @@ type Routing struct {
 	VisV6Total   int         `json:"vis_v6_total,omitempty"`
 	FirstSeen    string      `json:"first_seen,omitempty"`
 	PrefixesFrom string      `json:"prefixes_window,omitempty"`
+	History      *ASNHistory `json:"history,omitempty"`
 }
 
 // Eyeballs summarises APNIC Labs user estimates.
@@ -179,12 +181,13 @@ type Options struct {
 	Neighbours bool          // RIPEstat asn-neighbours
 	Visibility bool          // RIPEstat routing-status
 	Prefixes   bool          // keep the full prefix lists in the report
+	History    bool          // RIPEstat routing-history summary
 	Timeout    time.Duration // per source (default 15s)
 	NoNetwork  bool          // cache and local feeds only
 }
 
 // Full is what `traced asn` asks for.
-var Full = Options{Neighbours: true, Visibility: true, Prefixes: true}
+var Full = Options{Neighbours: true, Visibility: true, Prefixes: true, History: true}
 
 // ParseASN accepts "AS13335", "as13335", "13335", "ASN13335".
 func ParseASN(s string) (int, bool) {
@@ -970,9 +973,27 @@ func RIPE(ctx context.Context, asn int, o Options) (*Routing, bool, error) {
 			if err != nil {
 				return c, err
 			}
+			EnrichNeighbourNames(ctx, ups)
 			mu.Lock()
 			r.Left, r.Right, r.Uncertain, r.Upstreams = l, rr, u, ups
 			mu.Unlock()
+			return c, nil
+		})
+	}
+	if o.History {
+		run(func() (bool, error) {
+			start := time.Now().UTC().AddDate(-2, 0, 0).Format("2006-01-02")
+			var raw json.RawMessage
+			c, err := ripeGetResource(ctx, "routing-history", "AS"+strconv.Itoa(asn), "starttime="+start, 24*time.Hour, o.NoNetwork, &raw)
+			if err != nil {
+				return c, nil // history is supplemental
+			}
+			h, err := ParseASNHistory(raw)
+			if err == nil && h != nil {
+				mu.Lock()
+				r.History = h
+				mu.Unlock()
+			}
 			return c, nil
 		})
 	}
@@ -1047,36 +1068,40 @@ func (e partialErr) Error() string { return "partial: " + string(e) }
 
 // Brief is the compact profile attached to traces (map hop cards, IX/PoP layer).
 type Brief struct {
-	ASN         int       `json:"asn"`
-	Name        string    `json:"name,omitempty"`
-	Org         string    `json:"org,omitempty"`
-	Country     string    `json:"country,omitempty"`
-	Rank        int       `json:"rank,omitempty"`
-	Clique      bool      `json:"clique,omitempty"`
-	ConeASNs    int       `json:"cone_asns,omitempty"`
-	ConePfx     int       `json:"cone_prefixes,omitempty"`
-	Providers   int       `json:"providers,omitempty"`
-	Peers       int       `json:"peers,omitempty"`
-	Customers   int       `json:"customers,omitempty"`
-	Type        string    `json:"type,omitempty"`
-	Traffic     string    `json:"traffic,omitempty"`
-	Ratio       string    `json:"ratio,omitempty"`
-	Policy      string    `json:"policy,omitempty"`
-	IXCount     int       `json:"ix_count,omitempty"`
-	FacCount    int       `json:"fac_count,omitempty"`
-	PrefixesV4  int       `json:"prefixes_v4,omitempty"`
-	PrefixesV6  int       `json:"prefixes_v6,omitempty"`
-	AddressesV4 int64     `json:"addresses_v4,omitempty"`
-	Users       int64     `json:"users,omitempty"`
-	UsersCC     string    `json:"users_cc,omitempty"`
-	UsersPctCC  float64   `json:"users_pct_cc,omitempty"`
-	UsersPctW   float64   `json:"users_pct_world,omitempty"`
-	Rep         string    `json:"rep,omitempty"` // Clean / Low risk / Suspicious / Dirty
-	RepScore    int       `json:"rep_score,omitempty"`
-	RepNotes    []string  `json:"rep_notes,omitempty"`
-	PoPs        []PoP     `json:"pops,omitempty"`
-	Errors      []string  `json:"errors,omitempty"`
-	Fetched     time.Time `json:"fetched,omitempty"`
+	ASN         int         `json:"asn"`
+	Name        string      `json:"name,omitempty"`
+	Org         string      `json:"org,omitempty"`
+	Country     string      `json:"country,omitempty"`
+	Rank        int         `json:"rank,omitempty"`
+	Clique      bool        `json:"clique,omitempty"`
+	ConeASNs    int         `json:"cone_asns,omitempty"`
+	ConePfx     int         `json:"cone_prefixes,omitempty"`
+	Providers   int         `json:"providers,omitempty"`
+	Peers       int         `json:"peers,omitempty"`
+	Customers   int         `json:"customers,omitempty"`
+	Type        string      `json:"type,omitempty"`
+	Traffic     string      `json:"traffic,omitempty"`
+	Ratio       string      `json:"ratio,omitempty"`
+	Policy      string      `json:"policy,omitempty"`
+	IXCount     int         `json:"ix_count,omitempty"`
+	FacCount    int         `json:"fac_count,omitempty"`
+	PrefixesV4  int         `json:"prefixes_v4,omitempty"`
+	PrefixesV6  int         `json:"prefixes_v6,omitempty"`
+	AddressesV4 int64       `json:"addresses_v4,omitempty"`
+	Upstreams   []Neighbour `json:"upstreams,omitempty"`
+	VisV4Seeing int         `json:"vis_v4_seeing,omitempty"`
+	VisV4Total  int         `json:"vis_v4_total,omitempty"`
+	History     *ASNHistory `json:"history,omitempty"`
+	Users       int64       `json:"users,omitempty"`
+	UsersCC     string      `json:"users_cc,omitempty"`
+	UsersPctCC  float64     `json:"users_pct_cc,omitempty"`
+	UsersPctW   float64     `json:"users_pct_world,omitempty"`
+	Rep         string      `json:"rep,omitempty"` // Clean / Low risk / Suspicious / Dirty
+	RepScore    int         `json:"rep_score,omitempty"`
+	RepNotes    []string    `json:"rep_notes,omitempty"`
+	PoPs        []PoP       `json:"pops,omitempty"`
+	Errors      []string    `json:"errors,omitempty"`
+	Fetched     time.Time   `json:"fetched,omitempty"`
 }
 
 // PoP is a located exchange or facility of the AS.
@@ -1115,6 +1140,15 @@ func BriefOf(r *Report, near [][2]float64, maxPoPs int) *Brief {
 	}
 	if rt := r.Routing; rt != nil {
 		b.PrefixesV4, b.PrefixesV6, b.AddressesV4 = rt.CountV4, rt.CountV6, rt.AddressesV4
+		b.VisV4Seeing, b.VisV4Total = rt.VisV4Seeing, rt.VisV4Total
+		b.History = rt.History
+		if len(rt.Upstreams) > 0 {
+			n := len(rt.Upstreams)
+			if n > 5 {
+				n = 5
+			}
+			b.Upstreams = append([]Neighbour(nil), rt.Upstreams[:n]...)
+		}
 	}
 	if e := r.Eyeballs; e != nil && len(e.Top) > 0 {
 		b.Users, b.UsersPctW = e.Users, e.PctWorld
