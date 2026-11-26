@@ -269,8 +269,8 @@ function asnCardHTML(asn, hop) {
     ['cone', b.cone_asns ? `${human(b.cone_asns)} AS · ${human(b.cone_prefixes)} prefixes` : ''],
     ['degree', b.rank ? `${b.providers || 0} up · ${b.peers || 0} peers · ${b.customers || 0} cust` : ''],
     ['type', b.type], ['traffic', b.traffic], ['ratio', b.ratio], ['policy', b.policy],
-    ['prefixes', b.prefixes_v4 || b.prefixes_v6 ? `${b.prefixes_v4} v4 · ${b.prefixes_v6} v6${b.addresses_v4 ? ' · ' + human(b.addresses_v4) + ' addr' : ''}` : ''],
-    ['eyeballs', users], ['presence', b.ix_count || b.fac_count ? `${b.ix_count} IX · ${b.fac_count} facilities` : ''],
+    ['prefixes', b.prefixes_v4 || b.prefixes_v6 ? `${b.prefixes_v4 || 0} v4 · ${b.prefixes_v6 || 0} v6${b.addresses_v4 ? ' · ' + human(b.addresses_v4) + ' addr' : ''}` : ''],
+    ['eyeballs', users], ['presence', b.ix_count || b.fac_count ? `${b.ix_count || 0} IX · ${b.fac_count || 0} facilities` : ''],
     ['reputation', b.rep ? `${b.rep} (${b.rep_score || 0}/100)` : ''], ['listings', b.rep_notes], ['errors', b.errors]])}`;
 }
 
