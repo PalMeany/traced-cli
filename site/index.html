@@ -17,7 +17,7 @@ pre{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding
 footer{margin-top:56px;color:var(--mut);font-size:14px}a{color:var(--acc)}
 </style></head><body><main>
 <h1>traced<span>_</span></h1>
-<p class="lead">traceroute, который не врёт про города. ECMP, MPLS, SNI/DPI-пробы, geoip с проверкой по физике RTT, WHOIS/RDAP, живой MTR и карта.</p>
+<p class="lead">traceroute, который не врёт про города. ECMP, MPLS, SNI/DPI-пробы, geoip с проверкой по физике RTT, WHOIS/RDAP, аналитика провайдеров и репутация, живой MTR и карта с подводными кабелями.</p>
 <div class="cmd"><code>curl -sL <b>traced.netkitty.dev</b> | sh -s -- 1.1.1.1</code><button onclick="navigator.clipboard.writeText('curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1');this.textContent='скопировано'">копировать</button></div>
 <h2>Без установки</h2>
 <pre><i># трасса (на linux без root — через sudo)</i>
@@ -26,16 +26,23 @@ curl -sL traced.netkitty.dev | sh -s -- 8.8.8.8
 curl -sL traced.netkitty.dev | sh -s -- sni example.com
 <i># whois/rdap + dns + asn + geofeed</i>
 wget -qO- traced.netkitty.dev | sh -s -- whois 1.1.1.1
+<i># провайдер: PeeringDB, ранг CAIDA, префиксы BGP, абоненты APNIC</i>
+curl -sL traced.netkitty.dev | sh -s -- asn AS8359
+<i># чистота IP/AS/домена: Kinetio, Spamhaus, FireHOL, ET, Tor, AbuseIPDB</i>
+curl -sL traced.netkitty.dev | sh -s -- rep 185.220.101.1
 <i># живой mtr</i>
 curl -sL traced.netkitty.dev | sh -s -- mtr 9.9.9.9</pre>
 <p style="color:var(--mut);font-size:14px">В конце трасса печатает ссылку на карту — <code>карта: https://traced.netkitty.dev/t/…</code>: та же карта с хопами, ASN, городами и RTT, открывается в браузере и живёт 30 дней. Уходит только сама трасса; отключить — <code>--no-share</code> или <code>TRACED_NO_SHARE=1</code>.</p>
-<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.1.0</code>.</p>
+<p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.2.0</code>.</p>
 <h2>Что умеет</h2>
 <div class="grid">
 <div class="card"><b>Честный geoip</b><p>rDNS и коды IATA, IXP из PeeringDB, geofeed RFC 8805, RIPE IPmap — и отбраковка по скорости света: anycast-«Бангкок» за 9 мс не пройдёт.</p></div>
 <div class="card"><b>ECMP и MPLS</b><p>Несколько проб на хоп показывают балансировку, метки MPLS видны из ICMP-расширений, есть режим --paris.</p></div>
 <div class="card"><b>SNI/DPI-пробы</b><p>TLS ClientHello с нужным SNI по TTL: на каком хопе фильтр рвёт соединение.</p></div>
 <div class="card"><b>WHOIS/RDAP</b><p>Домены и IP: RDAP, WHOIS43, DNS, ASN через Cymru и RIPEstat.</p></div>
+<div class="card"><b>Провайдеры и AS</b><p>traced asn: тип сети, трафик и пиринг-политика из PeeringDB, ранг и конус CAIDA, анонсы RIPEstat, абоненты APNIC; карточка AS по клику на хоп.</p></div>
+<div class="card"><b>Репутация</b><p>traced rep: Kinetio DTIH, Spamhaus DROP/ASN-DROP/ZEN, FireHOL, Emerging Threats, Tor, AbuseIPDB — вердикт Clean / Low risk / Suspicious / Dirty.</p></div>
+<div class="card"><b>Подводные ВОЛС</b><p>Слои кабелей TeleGeography, станций высадки и точек присутствия (IX/ЦОД) на карте; подсказка, какой кабель мог нести длинный сегмент.</p></div>
 <div class="card"><b>MTR и история</b><p>Живая статистика потерь, сохранённые трассы и diff между ними.</p></div>
 <div class="card"><b>Веб-карта и ссылка</b><p>traced map — локальная карта на MapLibre GL с путями и хопами; после трассы — ссылка traced.netkitty.dev/t/… на неё онлайн (--no-share — без ссылки).</p></div>
 </div>
