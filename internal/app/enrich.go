@@ -51,7 +51,7 @@ func newEnricher(ctx context.Context, emit func(trace.Event)) *enricher {
 func (e *enricher) add(h *trace.Hop) {
 	for i := range h.Responders {
 		a := ASOf(&h.Responders[i])
-		if a == nil || a.ASN == 0 || a.ASN >= 64512 && a.ASN <= 65535 || a.ASN >= 4200000000 {
+		if a == nil || a.ASN <= 0 || a.ASN >= 64512 && a.ASN <= 65535 || uint32(a.ASN) >= 4200000000 {
 			continue
 		}
 		e.mu.Lock()

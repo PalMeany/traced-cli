@@ -190,8 +190,9 @@ var Full = Options{Neighbours: true, Visibility: true, Prefixes: true}
 func ParseASN(s string) (int, bool) {
 	s = strings.ToUpper(strings.TrimSpace(s))
 	s = strings.TrimPrefix(strings.TrimPrefix(s, "ASN"), "AS")
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 || n > math.MaxUint32 {
+	u, err := strconv.ParseUint(s, 10, 32)
+	n := int(u)
+	if err != nil || n <= 0 { // n < 0: a 4-byte ASN above 2^31 on a 32-bit build
 		return 0, false
 	}
 	return n, true
