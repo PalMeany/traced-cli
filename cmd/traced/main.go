@@ -243,7 +243,7 @@ func cmdTrace(args []string) error {
 		}
 	}
 	if link != "" {
-		fmt.Fprintf(w, "\n%s %s\n", ui.C("\x1b[1m", "карта:"), ui.C("\x1b[36m", link))
+		fmt.Fprintf(w, "\n%s %s\n", ui.C("\x1b[1m", "map:"), ui.C("\x1b[36m", link))
 	}
 	if o.web && r.ID != "" {
 		return serveAndOpen(o, []string{r.ID})
@@ -481,7 +481,7 @@ func cmdMTR(args []string) error {
 				return
 			}
 			if link := publish(o, r); link != "" {
-				fmt.Fprintf(os.Stdout, "\n%s %s\n", ui.C("\x1b[1m", "карта:"), ui.C("\x1b[36m", link))
+				fmt.Fprintf(os.Stdout, "\n%s %s\n", ui.C("\x1b[1m", "map:"), ui.C("\x1b[36m", link))
 			}
 		},
 		OpenMap: func(r *trace.Result) (string, error) {
@@ -514,7 +514,7 @@ func publish(o *opts, r *trace.Result) string {
 		resp, err = share.Upload(ctx, o.shareURL, r)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, ui.C("\x1b[90m", "карта: не удалось загрузить трассу ("+err.Error()+"); --no-share отключает загрузку"))
+		fmt.Fprintln(os.Stderr, ui.C("\x1b[90m", "map: failed to upload trace ("+err.Error()+"); --no-share disables upload"))
 		return ""
 	}
 	return resp.URL

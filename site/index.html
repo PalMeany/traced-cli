@@ -39,7 +39,7 @@ curl -sL traced.netkitty.dev | sh -s -- rep 185.220.101.1
 curl -sL traced.netkitty.dev | sh -s -- mtr 9.9.9.9
 <i># магистраль провайдера с картинки его карты сети → GeoJSON</i>
 curl -sL traced.netkitty.dev | sh -s -- backbone parse map.png --provider RETN --asn 9002 --region europe --out retn.geojson</pre>
-<p style="color:var(--mut);font-size:14px">В конце трасса печатает ссылку на карту — <code>карта: https://traced.netkitty.dev/t/…</code>: та же карта с хопами, ASN, городами и RTT, открывается в браузере и живёт 30 дней. Уходит только сама трасса; отключить — <code>--no-share</code> или <code>TRACED_NO_SHARE=1</code>.</p>
+<p style="color:var(--mut);font-size:14px">В конце трасса печатает ссылку на карту — <code>map: https://traced.netkitty.dev/t/…</code>: та же карта с хопами, ASN, городами и RTT, открывается в браузере и живёт 30 дней. Уходит только сама трасса; отключить — <code>--no-share</code> или <code>TRACED_NO_SHARE=1</code>.</p>
 <p style="color:var(--mut);font-size:14px">Скрипт определяет ОС и архитектуру (linux amd64/arm64/arm/386, macOS, FreeBSD), качает бинарник из релиза на GitHub во временную папку, сверяет SHA256, запускает и удаляет. Версия: <code>TRACED_VERSION=v1.4.0</code>.</p>
 <h2>Что умеет</h2>
 <div class="grid">

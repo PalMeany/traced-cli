@@ -44,7 +44,7 @@ It is a single static Go binary with a live MTR view, trace history with diffs a
   - **Импорт карты…** in the layer panel: upload a provider's network map picture (PNG/JPEG/WebP/SVG), it is parsed by `traced backbone` on the server and shown at once; locally it can be saved as a layer, on the public map it stays in your browser session only
 - **Backbones from map pictures** (`traced backbone`): see [below](#terrestrial-backbones).
 
-- **Online map link:** after a trace (and when you quit `traced mtr`) the result is published and a link is printed — `карта: https://traced.netkitty.dev/t/<id>`. The page is the same map in read-only mode: hops, ASN, cities, RTT, the path and the hop table. Links live 30 days. `--no-share` or `TRACED_NO_SHARE=1` turns it off; `--share-url` points to your own `traced share-server`.
+- **Online map link:** after a trace (and when you quit `traced mtr`) the result is published and a link is printed — `map: https://traced.netkitty.dev/t/<id>`. The page is the same map in read-only mode: hops, ASN, cities, RTT, the path and the hop table. Links live 30 days. `--no-share` or `TRACED_NO_SHARE=1` turns it off; `--share-url` points to your own `traced share-server`.
 
 ![web map](docs/screenshot.png)
 
@@ -59,7 +59,7 @@ curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1
 wget -qO- traced.netkitty.dev | sh -s -- sni example.com
 ```
 
-В конце печатается ссылка на карту трассы: `карта: https://traced.netkitty.dev/t/<id>` (хранится 30 дней; отключить — `--no-share` или `TRACED_NO_SHARE=1`):
+В конце печатается ссылка на карту трассы: `map: https://traced.netkitty.dev/t/<id>` (хранится 30 дней; отключить — `--no-share` или `TRACED_NO_SHARE=1`):
 
 ```sh
 curl -sL traced.netkitty.dev | sh -s -- 1.1.1.1 --no-share

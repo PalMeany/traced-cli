@@ -7,7 +7,7 @@ const SHARE = document.documentElement.dataset.mode === 'share';
 const SHARE_ID = SHARE ? (document.querySelector('meta[name="traced-share"]')?.content || location.pathname.split('/').pop()) : '';
 const SHARE_MAP = SHARE && SHARE_ID === 'map'; // public map without a trace (traced.netkitty.dev/t/map)
 const MAP_INTRO = `Terrestrial backbones of large providers (built-in dataset) and submarine cables — toggle them top left.
-  “Импорт карты…” parses a provider's network map picture (PNG/JPEG/WebP/SVG) and keeps the layer in this browser session only.`;
+  “Import map…” parses a provider's network map picture (PNG/JPEG/WebP/SVG) and keeps the layer in this browser session only.`;
 const PALETTE = ['#5cc8ff', '#ff8a5c', '#b78cff', '#3ddc97', '#ffd35c', '#ff5da8', '#5cffe1', '#c0c8d4'];
 const STYLES = [
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -107,7 +107,7 @@ function initMap() {
 }
 
 // ---------------- overlay layers: submarine cables, landing points, IX / PoP ----------------
-const LAYERS = { cables: 'Submarine cables (ВОЛС)', backbones: 'Terrestrial backbones (наземные)', landing: 'Landing points', pops: 'IX / PoP' };
+const LAYERS = { cables: 'Submarine cables', backbones: 'Terrestrial backbones', landing: 'Landing points', pops: 'IX / PoP' };
 const layerState = (() => { try { return JSON.parse(localStorage.getItem('traced.layers') || '{}'); } catch { return {}; } })();
 const layerOn = (k) => !!layerState[k];
 let cablesLoaded = null; // promise
@@ -212,7 +212,7 @@ function initLayerControl() {
     + (k === 'backbones' ? `<div id="bbpanel" class="bbpanel" ${layerOn('backbones') ? '' : 'hidden'}>
       <input id="bbq" type="search" placeholder="filter: provider or AS…" aria-label="filter backbones by provider or ASN" spellcheck="false">
       <div id="bblist" class="bblist"></div>
-      <button type="button" id="bbimportbtn" class="ghost small">Импорт карты…</button></div>` : '')).join('');
+      <button type="button" id="bbimportbtn" class="ghost small">Import map…</button></div>` : '')).join('');
   box.querySelectorAll('input[data-layer]').forEach((cb) => cb.addEventListener('change', () => setLayer(cb.dataset.layer, cb.checked)));
   $('#bbq').addEventListener('input', (e) => { bb.query = e.target.value.trim().toLowerCase(); applyBBFilter(); renderBBList(); });
   $('#bbimportbtn').addEventListener('click', openImport);
