@@ -67,6 +67,8 @@ trace flags:
   --sni NAME          after the trace run an SNI probe against the target IP
   --mtu               after the trace run ICMP DF + TCP MSS/PMTUD path MTU probe (20→5→1)
   --no-nat            skip NAT / CGNAT detection
+  -v / --verbose      show BGP prefix upstreams, NAT layers and terrestrial backbones
+  --share-ip          show full public IP (by default masked to /16)
   --web               open the result on the web map
   --json              JSON output
   --no-geo            no geolocation/ASN       --offline  local geo sources only
@@ -212,6 +214,10 @@ func cmdTrace(args []string) error {
 	if r == nil {
 		return err
 	}
+	ex := app.ExtraOf(r)
+	if !o.shareIP && ex != nil && ex.NAT != nil {
+		ex.NAT = trace.RedactNAT(ex.NAT)
+	}
 	link := ""
 	if !o.noShare && len(r.Hops) > 0 {
 		link = publish(o, r)
@@ -224,9 +230,8 @@ func cmdTrace(args []string) error {
 			ShareURL string `json:"share_url,omitempty"`
 		}{r, link})
 	}
-	ex := app.ExtraOf(r)
 	ui.Anomalies(w, r)
-	ui.PathIntel(w, r)
+	ui.PathIntel(w, r, ui.PathIntelOptions{Verbose: o.verbose, ShareIP: o.shareIP})
 	ui.Summary(w, r)
 	if ex != nil {
 		ui.SNI(w, ex.SNI)

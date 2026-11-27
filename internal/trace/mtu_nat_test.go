@@ -1,6 +1,9 @@
 package trace
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMTUSearch(t *testing.T) {
 	cases := []struct {
@@ -88,4 +91,42 @@ func TestAnalyzeNAT(t *testing.T) {
 			t.Fatalf("post-public private hop should not count as client NAT: %+v", r)
 		}
 	})
+}
+
+func TestMaskIPAndRedactNAT(t *testing.T) {
+	cases := map[string]string{
+		"81.90.20.175":        "81.90.*.*",
+		"192.168.1.50":        "192.168.*.*",
+		"2001:db8:85a3::8a2e": "2001:db8::*",
+		"81.90.*.*":           "81.90.*.*",
+		"":                    "",
+	}
+	for in, want := range cases {
+		if got := MaskIP(in); got != want {
+			t.Errorf("MaskIP(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	orig := AnalyzeNAT("172.19.0.1", "81.90.20.175", []Hop{{TTL: 1, Responders: []Responder{{IP: "172.19.0.1"}}}})
+	red := RedactNAT(orig)
+	if red.PublicIP != "81.90.*.*" {
+		t.Fatalf("PublicIP = %q, want 81.90.*.*", red.PublicIP)
+	}
+	if orig.PublicIP != "81.90.20.175" {
+		t.Fatalf("RedactNAT mutated orig.PublicIP: %q", orig.PublicIP)
+	}
+	for _, ev := range red.Evidence {
+		if strings.Contains(ev, "81.90.20.175") {
+			t.Fatalf("Evidence leaks raw IP: %q", ev)
+		}
+	}
+	foundMasked := false
+	for _, ev := range red.Evidence {
+		if strings.Contains(ev, "81.90.*.*") {
+			foundMasked = true
+		}
+	}
+	if !foundMasked {
+		t.Fatalf("Evidence missing masked IP: %+v", red.Evidence)
+	}
 }

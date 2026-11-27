@@ -86,7 +86,14 @@ func Sanitize(r *trace.Result) (*trace.Result, error) {
 		if ex.NAT != nil {
 			cn := *ex.NAT
 			cn.LocalIP = ""
-			cn.PublicIP = ""
+			if len(cn.Evidence) > 0 {
+				ev := make([]string, len(cn.Evidence))
+				copy(ev, cn.Evidence)
+				cn.Evidence = ev
+			}
+			if cn.PublicIP == "" {
+				cn = *trace.RedactNAT(&cn)
+			}
 			ne.NAT = &cn
 		}
 		if w := ex.Whois; w != nil {

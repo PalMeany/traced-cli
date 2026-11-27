@@ -359,8 +359,14 @@ func FeedResults(w io.Writer, rs []feeds.Result) {
 	}
 }
 
+// PathIntelOptions controls extra sections and IP visibility in PathIntel.
+type PathIntelOptions struct {
+	Verbose bool // show BGP prefix upstreams, NAT layers and terrestrial backbones
+	ShareIP bool // show full public IP instead of /16 mask
+}
+
 // PathIntel prints the AS profiles and cable hints attached to a trace.
-func PathIntel(w io.Writer, r *trace.Result) {
+func PathIntel(w io.Writer, r *trace.Result, opt PathIntelOptions) {
 	ex := app.ExtraOf(r)
 	if ex == nil {
 		return
@@ -427,7 +433,7 @@ func PathIntel(w io.Writer, r *trace.Result) {
 			fmt.Fprintf(w, "  hop %-2d %s %s %s %s\n", x.TTL, C(magenta, Pad(x.Name, 24)), Pad(loc, 18), C(gray, x.IP), C(gray, via))
 		}
 	}
-	if len(ex.PrefixBGP) > 0 {
+	if opt.Verbose && len(ex.PrefixBGP) > 0 {
 		fmt.Fprintln(w, C(bold, "\nBGP prefix upstreams & history")+C(gray, " (where hop prefixes are announced)"))
 		var pfxs []string
 		for k := range ex.PrefixBGP {
@@ -466,8 +472,8 @@ func PathIntel(w io.Writer, r *trace.Result) {
 			fmt.Fprintf(w, "  %s %s → %s%s\n", C(cyan, Pad(pb.Prefix, 19)), C(gray, fmt.Sprintf("AS%-7d", pb.OriginASN)), upStr, histNote)
 		}
 	}
-	if ex.NAT != nil {
-		NAT(w, ex.NAT)
+	if opt.Verbose && ex.NAT != nil {
+		NAT(w, ex.NAT, opt.ShareIP)
 	}
 	if ex.MTU != nil {
 		MTU(w, ex.MTU)
@@ -497,7 +503,7 @@ func PathIntel(w io.Writer, r *trace.Result) {
 			fmt.Fprintf(w, "  hop %d→%d %s → %s %s: %s\n", s.FromTTL, s.ToTTL, s.From, s.To, C(gray, fmt.Sprintf("%.0f km", s.Km)), strings.Join(names, ", "))
 		}
 	}
-	if len(ex.Backbones) > 0 {
+	if opt.Verbose && len(ex.Backbones) > 0 {
 		fmt.Fprintln(w, C(bold, "\nTerrestrial backbones")+C(gray, " (the path enters ASes whose backbone map is known; traced map shows them)"))
 		for _, b := range ex.Backbones {
 			var hops []string
@@ -680,9 +686,12 @@ func MTU(w io.Writer, m *trace.MTUResult) {
 }
 
 // NAT prints NAT / double-triple NAT / CGNAT detection.
-func NAT(w io.Writer, n *trace.NATResult) {
+func NAT(w io.Writer, n *trace.NATResult, shareIP bool) {
 	if n == nil {
 		return
+	}
+	if !shareIP {
+		n = trace.RedactNAT(n)
 	}
 	col := green
 	label := "no NAT (direct)"

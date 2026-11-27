@@ -253,10 +253,13 @@ func cmdNAT(args []string) error {
 		}
 	}
 	nat := trace.DetectNAT(ctx, tip, hops, o.offline)
+	if !o.shareIP {
+		nat = trace.RedactNAT(nat)
+	}
 	if o.jsonOut {
 		return printJSON(nat)
 	}
-	ui.NAT(os.Stdout, nat)
+	ui.NAT(os.Stdout, nat, o.shareIP)
 	return nil
 }
 

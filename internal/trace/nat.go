@@ -279,3 +279,60 @@ func parsePublicIPBody(s string) string {
 	}
 	return ""
 }
+
+// MaskIP hides the host part of an IP address: IPv4 is masked to /16
+// (e.g. 81.90.20.175 -> 81.90.*.*), IPv6 to /32 (e.g. 2001:db8::*).
+func MaskIP(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return s
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return fmt.Sprintf("%d.%d.*.*", v4[0], v4[1])
+	}
+	if len(ip) == net.IPv6len {
+		return fmt.Sprintf("%x:%x::*", uint16(ip[0])<<8|uint16(ip[1]), uint16(ip[2])<<8|uint16(ip[3]))
+	}
+	return s
+}
+
+// RedactNAT returns a copy of n with PublicIP (and any public IP mention in
+// Evidence) masked to /16 (IPv4) or /32 (IPv6).
+func RedactNAT(n *NATResult) *NATResult {
+	if n == nil {
+		return nil
+	}
+	cp := *n
+	origPub := strings.TrimSpace(n.PublicIP)
+	maskedPub := MaskIP(origPub)
+	cp.PublicIP = maskedPub
+	if len(n.Evidence) > 0 {
+		ev := make([]string, len(n.Evidence))
+		for i, line := range n.Evidence {
+			if origPub != "" && maskedPub != origPub {
+				line = strings.ReplaceAll(line, origPub, maskedPub)
+			}
+			const marker = "differs from public IP "
+			if idx := strings.Index(line, marker); idx >= 0 {
+				rest := line[idx+len(marker):]
+				end := strings.IndexAny(rest, " ,;)")
+				tok := rest
+				suffix := ""
+				if end >= 0 {
+					tok = rest[:end]
+					suffix = rest[end:]
+				}
+				if ip := net.ParseIP(tok); ip != nil {
+					line = line[:idx+len(marker)] + MaskIP(tok) + suffix
+				}
+			}
+			ev[i] = line
+		}
+		cp.Evidence = ev
+	}
+	return &cp
+}
